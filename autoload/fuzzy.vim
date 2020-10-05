@@ -340,11 +340,6 @@ def FilterTags(id: number, key: string): bool #{{{2
     elseif key == "\<m-r>" || key == "\<f29>"
         UpdatePreview()
         return true
-
-    # this seems to prevent the cursor  from sometimes briefly blinking (when we
-    # have an autocmd listening to `CursorHold`)
-    elseif key == "\<CursorHold>"
-        return true
     endif
 
     return popup_filter_menu(id, key)
@@ -354,9 +349,15 @@ def UpdatePopup(popup = true) #{{{2
     if popup
         UpdateMain()
     endif
-    UpdatePreview()
+    if preview_timer > 0
+        timer_stop(preview_timer)
+        preview_timer = 0
+    endif
+    # No need to prettify the preview on every keypress, when we're typing fast.
+    timer_start(100, {-> UpdatePreview()})
     UpdateTitle()
 enddef
+var preview_timer = 0
 
 def UpdateMain() #{{{2
 # update the popup with the new list of tag names
@@ -463,7 +464,7 @@ def UpdatePreview() #{{{2
     var filename: string
     var tagname: string
     [tagname, filename] = matchlist[1:2]
-    # Why passing `true, true` as argument to `globpath()`?{{{
+    # Why passing "true, true" as argument to `globpath()`?{{{
     #
     # The  first  `true` can  be  useful  if  for  some reason  `'suffixes'`  or
     # `'wildignore'` are misconfigured.
@@ -488,39 +489,21 @@ def UpdatePreview() #{{{2
     endif
     var text = readfile(filename)
     popup_settext(preview_winid, text)
+
     # highlight the text with the help syntax plugin
-    var cmd = 'if get(b:, "current_syntax", "") != "help" | exe "do Syntax help" | endif'
-    # the timer suppresses  some flickering in the statusline, when  we open the
-    # popup, and also  sometimes when we cycle through the  tags with e.g. `C-n` and `C-p`
-    # TODO: Why?  Could Vim be improved to avoid this kind of pitfall?
-    timer_start(0, {-> win_execute(preview_winid, cmd)})
-    setwinvar(preview_winid, '&cole', 3)
+    var setsyntax = 'if get(b:, "current_syntax", "") != "help" | exe "do Syntax help" | endif'
     tagname = substitute(tagname, "'", "''", 'g')->escape('\')
-    var searchcmd = printf("search('\\*\\V%s\\m\\*')", tagname)
-    # TODO: We need a redraw.  Vim bug?
-    # TODO: The cursor sometimes flicker,{{{
-    # and sometimes jumps to a different location, even when we don't type anything.
+    var searchcmd = printf("echo search('\\*\\V%s\\m\\*')", tagname)
+    # Why not just running `search()`?{{{
     #
-    # It seems  the filter function  is invoked even  when we don't  type.  What
-    # causes this?  Is it a bug?  Or  do we have some other plugin/custom config
-    # which regularly feeds keys into the typeahead buffer?
-    # Update: I   suspect   it's   the  pseudo-key   `<CursorHold>`   which   is
-    # automatically pressed when we have an autocmd listening to `CursorHold`.
-    #
-    # Update: I don't think I can reproduce anymore.
-    # At least, the issue is no longer that bad.
-    #
-    # I can still see the cursor briefly flicker sometimes.
-    # Adding this clause in the filter function seems to help:
-    #
-    #     elseif key == "\<CursorHold>"
-    #         return true
-    #
-    # At least, when Vim is started without any file argument.
-    # But when  Vim is started  with a file  argument, something seems  a little
-    # off.  For example, the popup title briefly flickers sometimes.
+    # If you just run `search()`, Vim won't redraw the preview popup.
+    # You'll need to run `:redraw`; but the latter causes some flicker (with the
+    # cursor, and in the statusline, tabline).
     #}}}
-    [searchcmd, 'redraw']->win_execute(preview_winid)
+    var lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>")
+    var showtag = 'norm! ' .. lnum .. 'G'
+    var cmd = [setsyntax, '&l:cole = 3', showtag]
+    win_execute(preview_winid, cmd)
 enddef
 
 def UpdateTitle() #{{{2
