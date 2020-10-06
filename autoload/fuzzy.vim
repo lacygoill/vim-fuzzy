@@ -1,14 +1,5 @@
 vim9script
 
-# TODO: Feature request: ask whether `matchfuzzy()` could handle  whitespace in `{str}` like `fzf(1)` does.{{{
-#
-# At least how it does in interactive mode.
-# Also, could it handle some metacharacters like `^`, `$`, `!`?
-# And maybe an "exact" mode?
-#
-# Update: Actually, we might be able to handle `^`, `$`, `!` ourselves.
-# Same thing for the exact mode.
-#}}}
 # TODO: Feature request: a new builtin popup menu filter{{{
 # which would be different than the existing one in 2 fundamental ways:
 #
@@ -226,9 +217,6 @@ def InitTaglist() #{{{2
         .. ' | ' .. formatting_cmd
         .. ' | sort'
 
-    # taglist accumulated on each job's callback; need to be reset every time we
-    # invoke `:FuzzyHelp` to prevent duplicate tagnames from piling up in the list
-    acc_taglist = ''
     # The shell command might take too long.  Let's start it asynchronously.{{{
     #
     # Right now, it takes about `.17s` which doesn't seem a lot.
@@ -245,22 +233,26 @@ def InitTaglist() #{{{2
         noblock: true,
         })
 enddef
-var acc_taglist: string
 
 def SetIntermediateTaglist(_c: channel, data: string) #{{{2
-    acc_taglist ..= data
-    var splitted_data = split(data, '\n')
+    var _data: string
+    if incomplete != ''
+        _data = incomplete .. data
+    else
+        _data = data
+    endif
+    var splitted_data = split(_data, '\n\ze.')
     # The last line of `data` does not necessarily match a full shell output line.
     # Most of the time, it's incomplete.
-    remove(splitted_data, -1)
+    incomplete = remove(splitted_data, -1)
+    if len(splitted_data) == 0
+        return
+    endif
 
     # turn the strings into dictionaries to easily ignore the filename later when filtering
     TAGLIST += splitted_data
         ->map({_, v -> split(v, '\t')})
-        # For some reason, we need `get()`.
-        # It probably  means that  some line is  incomplete, which  shouldn't be
-        # possible thanks to the previous `remove()` ...
-        ->map({_, v -> #{text: v[0], suffix: get(v, 1, '')}})
+        ->map({_, v -> #{text: v[0], aftertab: v[1]}})
 
     # need to be  set now, in case  we don't write any filtering  text, and just
     # press Enter  on whatever entry is  the first; otherwise, we  won't jump to
@@ -271,11 +263,23 @@ def SetIntermediateTaglist(_c: channel, data: string) #{{{2
 
     UpdatePopup()
 enddef
+var incomplete = ''
 
 def SetFinalTaglist(...l: any) #{{{2
-    TAGLIST = split(acc_taglist, '\n')
-        ->map({_, v -> split(v, '\t')})
-        ->map({_, v -> #{text: v[0], suffix: v[1]}})
+    # Wait for all callbacks to have been processed.{{{
+    #
+    # From `:h job-exit_cb`:
+    #
+    #    > Note that data can be buffered, callbacks may still be
+    #    > called after the process ends.
+    #
+    # Without this sleep, sometimes, `parts[1]` would raise:
+    #
+    #     E684: list index out of range: 1
+    #}}}
+    sleep 1m
+    var parts = split(incomplete, '\t')
+    TAGLIST += [#{text: parts[0], aftertab: parts[1]}]
     UpdatePopup()
 enddef
 
@@ -334,6 +338,11 @@ def FilterTags(id: number, key: string): bool #{{{2
     # reset the cursor position in the preview popup
     elseif key == "\<m-r>" || key == "\<f29>"
         UpdatePreview()
+        return true
+
+    # prevent title from  flickering when `CursorHold` is fired, and  we have at
+    # least one autocmd listening
+    elseif key == "\<CursorHold>"
         return true
     endif
 
@@ -404,14 +413,14 @@ def UpdateMain() #{{{2
         # add info to get highlight via text properties
         highlighted_lines = filtered_taglist
             ->map({i, v -> #{
-                text: v.text .. v.suffix,
+                text: v.text .. v.aftertab,
                 props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyhelp'}}),
                 }})
     else
         highlighted_lines = TAGLIST
             ->copy()
             ->map({_, v -> #{
-                text: v.text .. v.suffix,
+                text: v.text .. v.aftertab,
                 props: [],
                 }})
     endif
