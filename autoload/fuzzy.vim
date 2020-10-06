@@ -54,38 +54,20 @@ var filter_text = ''
 var preview_winid = 0
 var tags_winid = 0
 
-# What's the difference between `TAGLIST` and `taglist_filtered`?{{{
+# What's the difference between `TAGLIST` and `filtered_taglist`?{{{
 #
 # The former is just the whole list of tag names.
 # The latter is the filtered list matching  the pattern which the user has typed
-# interactively.
-#
-# `TAGLIST` doesn't care about the popup nor about what the user has typed.
-# `taglist_filtered` does care about the popup and what the user has typed.
-#
-# `taglist_filtered` is needed by:
-#
-#     UpdateMain()
-#     JumpToTag()
-#
-# TODO: Where is `TAGLIST` needed?
-#
-#     fuzzyhelp#main()
-#     UpdateMain()
-#     FilteredTaglist()
-#
-# Is there some  inconsistency between where we use `TAGLIST`,  and where we use
-# `taglist_filtered`?
+# interactively at any given time.
 #}}}
 # TODO: There is some bug which prevents us from writing this:{{{
 #
-#     var TAGLIST: list<string>
+#     var TAGLIST: list<dict<string>>
 #
-# Report the bug.
-# Once it's fixed, update the line.
+# https://github.com/vim/vim/issues/7064
 #}}}
 var TAGLIST = []
-var taglist_filtered: list<string>
+var filtered_taglist: list<dict<string>>
 
 # Interface {{{1
 def fuzzy#help(pat_arg = '') #{{{2
@@ -244,9 +226,9 @@ def InitTaglist() #{{{2
         .. ' | ' .. formatting_cmd
         .. ' | sort'
 
-    # need to  be reset every time  we invoke `:FuzzyHelp` to  prevent duplicate
-    # tagnames from piling up in the list
-    taglist = ''
+    # taglist accumulated on each job's callback; need to be reset every time we
+    # invoke `:FuzzyHelp` to prevent duplicate tagnames from piling up in the list
+    acc_taglist = ''
     # The shell command might take too long.  Let's start it asynchronously.{{{
     #
     # Right now, it takes about `.17s` which doesn't seem a lot.
@@ -263,24 +245,37 @@ def InitTaglist() #{{{2
         noblock: true,
         })
 enddef
+var acc_taglist: string
 
 def SetIntermediateTaglist(_c: channel, data: string) #{{{2
-    taglist ..= data
+    acc_taglist ..= data
     var splitted_data = split(data, '\n')
     # The last line of `data` does not necessarily match a full shell output line.
     # Most of the time, it's incomplete.
     remove(splitted_data, -1)
+
+    # turn the strings into dictionaries to easily ignore the filename later when filtering
     TAGLIST += splitted_data
-    taglist_filtered = copy(TAGLIST)
-    if filter_text != ''
-        filter(taglist_filtered, {_, v -> split(v, '\t')[0] =~ filter_text})
-    endif
+        ->map({_, v -> split(v, '\t')})
+        # For some reason, we need `get()`.
+        # It probably  means that  some line is  incomplete, which  shouldn't be
+        # possible thanks to the previous `remove()` ...
+        ->map({_, v -> #{text: v[0], suffix: get(v, 1, '')}})
+
+    # need to be  set now, in case  we don't write any filtering  text, and just
+    # press Enter  on whatever entry is  the first; otherwise, we  won't jump to
+    # the right tag
+    filtered_taglist = TAGLIST
+        ->copy()
+        ->filter({_, v -> v.text =~ filter_text})
+
     UpdatePopup()
 enddef
-var taglist: string
 
 def SetFinalTaglist(...l: any) #{{{2
-    TAGLIST = split(taglist, '\n')
+    TAGLIST = split(acc_taglist, '\n')
+        ->map({_, v -> split(v, '\t')})
+        ->map({_, v -> #{text: v[0], suffix: v[1]}})
     UpdatePopup()
 enddef
 
@@ -349,12 +344,16 @@ def UpdatePopup(popup = true) #{{{2
     if popup
         UpdateMain()
     endif
+
+    # no need to  update the preview on every keypress,  when we're typing fast;
+    # update only when we've  paused for at least 100ms; below  that, I doubt we
+    # will notice the preview's contents not being updated
     if preview_timer > 0
         timer_stop(preview_timer)
         preview_timer = 0
     endif
-    # No need to prettify the preview on every keypress, when we're typing fast.
     timer_start(100, {-> UpdatePreview()})
+
     UpdateTitle()
 enddef
 var preview_timer = 0
@@ -393,58 +392,26 @@ def UpdateMain() #{{{2
         # whitespace, to prevent an explosion of the permutations number.
         #}}}
         var str = substitute(filter_text, '\s*', '', 'g')
+        var matchfuzzypos: list<list<any>> = matchfuzzypos(TAGLIST, str, #{key: 'text'})
         var pos: list<list<number>>
-        var matchfuzzypos: list<list<any>> = matchfuzzypos(TAGLIST, str)
-        # Why using `taglist_filtered` to save `matchfuzzypos()`?{{{
+        # Why using `filtered_taglist` to save `matchfuzzypos()`?{{{
         #
         # It needs  to be updated  now, so  that `JumpToTag()` jumps  to the
         # right tag later.
         #}}}
-        [taglist_filtered, pos] = matchfuzzypos
-
-        # Make `matchfuzzypos()` ignore the filename.
-        # Why not just passing the output of `matchfuzzypos()` to `filter()`?{{{
-        #
-        # We need to filter the tag names and the positions simultaneously.
-        # For   example,    if   `filter()`   removes   one    tag   name   from
-        # `taglist_filtered`, the next  time `pos[i] ` is evaluated,  it will no
-        # longer apply to the right item from `taglist_filtered`.
-        #}}}
-        # TODO: Wouldn't it make more sense for `matchfuzzypos()` to return only 1 list?{{{
-        #
-        # So far, the only way I've found is to merge the two lists temporarily.
-        #
-        # This makes me  think that `matchfuzzypos()` should return  the 2 lists
-        # as a single one.  Ask for the developers opinion?
-        #
-        # Maybe this single  list should contain dictionaries.  One  key for the
-        # string, and the other for the index positions.
-        #}}}
-        # TODO: Running `match()` all the time looks inefficient.{{{
-        #
-        # Could we split the lines on tabs, and cache the result?
-        # More generally, is there a more efficient way of getting the same result?
-        #}}}
-        # merge the lists returned by `matchfuzzypos()`
-        map(taglist_filtered, {i, v -> [v] + pos[i]})
-        # only keep tags for which the last matched character is before the tab
-        filter(taglist_filtered, {_, v -> v[-1] < match(v[0], "\t")})
-        # get back the positions back from the merged lists
-        pos = copy(taglist_filtered)->map({_, v -> v[1:]})
-        # get back the tag names back from the merged lists
-        map(taglist_filtered, {_, v -> v[0]})
+        [filtered_taglist, pos] = matchfuzzypos
 
         # add info to get highlight via text properties
-        highlighted_lines = taglist_filtered
-            ->copy()
+        highlighted_lines = filtered_taglist
             ->map({i, v -> #{
-                text: v,
+                text: v.text .. v.suffix,
                 props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyhelp'}}),
                 }})
     else
-        highlighted_lines = FilteredTaglist()
+        highlighted_lines = TAGLIST
+            ->copy()
             ->map({_, v -> #{
-                text: v,
+                text: v.text .. v.suffix,
                 props: [],
                 }})
     endif
@@ -526,7 +493,7 @@ def JumpToTag(id: number, result: number) #{{{2
         return
     endif
     try
-        var tagname = taglist_filtered[result - 1]->matchstr('\S\+')
+        var tagname = filtered_taglist[result - 1].text->matchstr('\S\+')
         exe 'h ' .. tagname
     catch
         echohl ErrorMsg
@@ -543,53 +510,5 @@ def JumpToTag(id: number, result: number) #{{{2
     # Idea: Move `TAGLIST` into a dictionary.
     # When you don't need it anymore, remove the key from the dictionary.
     #}}}
-enddef
-
-def FilteredTaglist(): list<string> #{{{2
-    return TAGLIST
-        ->copy()
-        # TODO: Doing the same splitting every time the filter popup is invoked is inefficient.{{{
-        #
-        # If we replace this line:
-        #
-        #     ->filter({_, v -> split(v, '\t')[0] =~ filter_text})
-        #
-        # With this one:
-        #
-        #     ->filter({_, v -> v =~ filter_text})
-        #
-        # We notice  a significant boost when  we use `:FuzzyHelp` (but  not the
-        # first time; or at least, it's less significant the first time).
-        # From ≈ .071s down to ≈ .055s
-        #
-        # Try to cache the splitting to make the function faster.
-        # This assignment:
-        #
-        #     let matching_parts = copy(TAGLIST)->map({_, v -> split(v, "\t")[0]})
-        #
-        # Could let us refactor this:
-        #
-        #     ->filter({_, v -> split(v, '\t')[0] =~ filter_text})
-        #
-        # Into this:
-        #
-        #     ->filter({i -> matching_parts[i] =~ filter_text})
-        #
-        # To be as efficient as possible, the caching should be done from `#main()`.
-        # But how to measure the gain in efficiency?
-        #
-        # We can't just run:
-        #
-        #     :Time FuzzyHelp
-        #
-        # It will be slow the first time (≈ .36s).
-        # It  will be  faster the  next  times (≈  .055s or  .071s depending  on
-        # whether we cache the splitting).
-        # But in both cases, we'll pay the price of the splitting caching.
-        # It's only afterward, when we start typing a filter text, that we might
-        # observe a  boost.  How to measure  this boost, and make  sure that our
-        # cache works and is useful?
-        #}}}
-        ->filter({_, v -> split(v, '\t')[0] =~ filter_text})
 enddef
 
