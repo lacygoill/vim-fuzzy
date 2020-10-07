@@ -249,10 +249,15 @@ def SetIntermediateTaglist(_c: channel, data: string) #{{{2
         return
     endif
 
-    # turn the strings into dictionaries to easily ignore the filename later when filtering
+    # Turn the strings into dictionaries to easily ignore some arbitrary trailing part when filtering.{{{
+    #
+    # For example, if we're  looking for a help tag, we  probably don't want our
+    # typed text  to be matched against  the filename.  Otherwise, we  might get
+    # too many irrelevant results (test with the pattern "changes").
+    #}}}
     TAGLIST += splitted_data
         ->map({_, v -> split(v, '\t')})
-        ->map({_, v -> #{text: v[0], aftertab: v[1]}})
+        ->map({_, v -> #{text: v[0], trailing: v[1]}})
 
     # need to be  set now, in case  we don't write any filtering  text, and just
     # press Enter  on whatever entry is  the first; otherwise, we  won't jump to
@@ -279,7 +284,7 @@ def SetFinalTaglist(...l: any) #{{{2
     #}}}
     sleep 1m
     var parts = split(incomplete, '\t')
-    TAGLIST += [#{text: parts[0], aftertab: parts[1]}]
+    TAGLIST += [#{text: parts[0], trailing: parts[1]}]
     UpdatePopup()
 enddef
 
@@ -371,37 +376,43 @@ def UpdateMain() #{{{2
 # update the popup with the new list of tag names
     var highlighted_lines: list<dict<any>>
     if filter_text =~ '\S'
-        # Only fuzzy match against the tag name; not the filename.
-        # Otherwise, we might get too many irrelevant results (test with the
-        # pattern "changes").
+        var matchfuzzypos: list<any>
+        # Problem: We can't pass the typed text to `matchfuzzypos()` directly.{{{
+        #
+        # If we type a whitespace-separated list of token, we want to:
+        #
+        #    - ignore the whitespace
+        #    - look for the tokens in all possible orders
+        #
+        # `matchfuzzypos()` will not look for the tokens in all possible orders,
+        # and won't even ignore whitespace.
+        #}}}
+        # Solution:{{{
+        #
+        # Split the  string on every  whitespace, compute all  permutations, run
+        # `matchfuzzypos()` on each permutation, and join the results.
+        #}}}
+        var tokens = split(filter_text)
+        # Problem: `matchfuzzypos()` gets too slow as the number of tokens increases.{{{
+        #
+        # 4 tokens = 24 permutations = 24 invocations of `matchfuzzypos()`.
+        #}}}
+        # Solution: Limit the splitting to 3 tokens max.{{{
+        #
+        # Note   that   this   already   generates   6   permutations,   causing
+        # `matchfuzzypos()` to be  invoked 6 times, which  is already noticeable
+        # (i.e. a keypress slightly lags when you have 3 tokens).
+        #}}}
+        if len(tokens) >= 4
+            var rest = tokens[2:]->join()->substitute('\s\+', '', 'g')
+            tokens = [tokens[0], tokens[1], rest]
+        endif
+        matchfuzzypos = tokens
+            ->Permutations()
+            ->map({_, v -> join(v, '')})
+            ->map({_, v -> matchfuzzypos(TAGLIST, v, #{key: 'text'})})
+            ->reduce({a, v -> [a[0] + v[0], a[1] + v[1]]})
 
-        # We need to remove whitespace.{{{
-        #
-        # Suppose we're looking for `:h function-search-undo`.
-        # We write `fun undo`; `matchfuzzy()` won't find anything because of
-        # the space.
-        #}}}
-        # TODO: What if we type 2 (or more) keywords in the wrong order?{{{
-        #
-        # Suppose – again – we're looking for `:h function-search-undo`.
-        # But this time, we type `undo fun`; `matchfuzzy()` won't find anything.
-        # Ideally, we should:
-        #
-        #    - split `filtered_text` at each whitespace
-        #    - generate all possible permutations of resulting tokens
-        #    - run `matchfuzzy()` against each permutation
-        #    - merge all the results
-        #
-        # This could take too much time if we write a lot of keywords.
-        #
-        #     a b c d e f g h i j k l
-        #
-        # 10 tokens; `10!` = `3628800` possible permuations.
-        # I  guess  we  could limit  the  splitting  to  the  first 3  or  5
-        # whitespace, to prevent an explosion of the permutations number.
-        #}}}
-        var str = substitute(filter_text, '\s*', '', 'g')
-        var matchfuzzypos: list<list<any>> = matchfuzzypos(TAGLIST, str, #{key: 'text'})
         var pos: list<list<number>>
         # Why using `filtered_taglist` to save `matchfuzzypos()`?{{{
         #
@@ -413,14 +424,14 @@ def UpdateMain() #{{{2
         # add info to get highlight via text properties
         highlighted_lines = filtered_taglist
             ->map({i, v -> #{
-                text: v.text .. v.aftertab,
+                text: v.text .. v.trailing,
                 props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyhelp'}}),
                 }})
     else
         highlighted_lines = TAGLIST
             ->copy()
             ->map({_, v -> #{
-                text: v.text .. v.aftertab,
+                text: v.text .. v.trailing,
                 props: [],
                 }})
     endif
@@ -519,5 +530,31 @@ def JumpToTag(id: number, result: number) #{{{2
     # Idea: Move `TAGLIST` into a dictionary.
     # When you don't need it anymore, remove the key from the dictionary.
     #}}}
+enddef
+#}}}1
+# Utility {{{1
+def Permutations(l: list<string>): list<list<string>> #{{{2
+# https://stackoverflow.com/a/17391851/9780968
+    if len(l) == 0
+        return [[]]
+    endif
+    var ret = []
+    # iterate over the permutations of the sublist which excludes the first item
+    for sublistPermutation in Permutations(l[1:])
+    # iterate over the permutations of the original list
+        for permutation in InsertItemAtAllPositions(l[0], sublistPermutation)
+            ret += [permutation]
+        endfor
+    endfor
+    return ret
+enddef
+
+def InsertItemAtAllPositions(item: string, l: list<string>): list<list<string>>
+    var ret = []
+    # iterate over all the positions at which we can insert the item in the list
+    for i in range(len(l) + 1)
+        ret += [ (i == 0 ? [] : l[0 : i - 1]) + [item] + l[i : ] ]
+    endfor
+    return ret
 enddef
 
