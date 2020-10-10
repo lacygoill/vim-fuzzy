@@ -43,25 +43,22 @@ const BORDERS = 4
 
 var filter_text = ''
 var preview_winid = 0
-var tags_winid = 0
+var menu_winid = 0
 
-# What's the difference between `TAGLIST` and `filtered_taglist`?{{{
-#
-# The former is just the whole list of tag names.
-# The latter is the filtered list matching  the pattern which the user has typed
-# interactively at any given time.
-#}}}
 # TODO: There is some bug which prevents us from writing this:{{{
 #
-#     var TAGLIST: list<dict<string>>
+#     var SOURCE: list<dict<string>>
 #
 # https://github.com/vim/vim/issues/7064
 #}}}
-var TAGLIST = []
-var filtered_taglist: list<dict<string>>
+var SOURCE = []
+var filtered_source: list<dict<string>>
+var sourcetype: string
 
 # Interface {{{1
-def fuzzy#help(pat_arg = '') #{{{2
+def fuzzy#main(type: string, pat_arg = '') #{{{2
+    sourcetype = type
+
     var height = &lines / 3
     var statusline = &ls == 2 || &ls == 1 && winnr('$') >= 2 ? 1 : 0
     var tabline = &stal == 2 || &stal == 1 && tabpagenr('$') >= 2 ? 1 : 0
@@ -95,29 +92,29 @@ def fuzzy#help(pat_arg = '') #{{{2
         minheight: height,
         maxwidth: width,
         minwidth: width,
-        # Set a title displaying some info about the numbers of tags we're dealing with.{{{
+        # Set a title displaying some info about the numbers of entries we're dealing with.{{{
         #
         # Example:
         #
         #     12/34 (56)
         #     ├┘ ├┘  ├┘
-        #     │  │   └ there were 56 help tags originally
-        #     │  └ there are 34 help tags remaining
-        #     └ we're selecting the 12th help tag
+        #     │  │   └ there were 56 help lines originally
+        #     │  └ there are 34 lines remaining
+        #     └ we're selecting the 12th line
         #}}}
         title: ' 0/0 (0)',
         highlight: 'Normal',
         borderchars: ['─', '│', '─', '│', '┌', '┐', '┘', '└'],
         scrollbar: false,
-        filter: FilterTags,
-        callback: JumpToTag,
+        filter: FilterLines,
+        callback: function(ExitCallback, [sourcetype]),
         }
 
     # create popup menu
-    tags_winid = popup_menu('', opts)
+    menu_winid = popup_menu('', opts)
 
     # create preview
-    opts = popup_getoptions(tags_winid)
+    opts = popup_getoptions(menu_winid)
     extend(opts, #{line: opts.line - (height + BORDERS / 2)})
     remove(opts, 'callback')
     remove(opts, 'cursorline')
@@ -125,20 +122,19 @@ def fuzzy#help(pat_arg = '') #{{{2
     remove(opts, 'title')
     preview_winid = popup_create('', opts)
 
-    if TAGLIST == []
-        # if we've run `:FuzzyHelp` for the first time, we need to initialize `TAGLIST`
-        InitTaglist()
-    else
-        # Otherwise, we just need to set the contents of the popup.
-        # We can keep using  the same value for the taglist;  the one with which
-        # it was  init the  last time.   Basically, `TAGLIST` can  be used  as a
-        # cache now.
-        UpdatePopup()
-    endif
+    InitSource()
 enddef
 #}}}1
 # Core {{{1
-def InitTaglist() #{{{2
+def InitSource() #{{{2
+    if sourcetype == 'help'
+        InitHelpTags()
+    elseif sourcetype == 'recentfiles'
+        InitRecentFiles()
+    endif
+enddef
+
+def InitHelpTags() #{{{2
     var tagfiles = globpath(&rtp, 'doc/tags', true, true)
 
     # What's the purpose of this formatting command?{{{
@@ -227,14 +223,38 @@ def InitTaglist() #{{{2
     # in that case, the shell command might take a much longer time.
     #}}}
     job_start(['/bin/sh', '-c', shellpipeline], #{
-        out_cb: SetIntermediateTaglist,
-        exit_cb: SetFinalTaglist,
+        out_cb: SetIntermediateSource,
+        exit_cb: SetFinalSource,
         mode: 'raw',
         noblock: true,
         })
 enddef
 
-def SetIntermediateTaglist(_c: channel, data: string) #{{{2
+def InitRecentFiles() #{{{2
+    var source: list<string> = BuflistedSorted()
+        + copy(v:oldfiles)->filter({_, v -> expand(v)->filereadable()})
+    map(source, {_, v -> fnamemodify(v, ':p')})
+    var curbuf = expand('%:p')
+    SOURCE = source
+        ->filter({_, v -> v != '' && v != curbuf})
+        ->Uniq()
+        ->map({_, v -> #{text: fnamemodify(v, ':~:.'), trailing: ''}})
+    # TODO: In  the  future, you  might  want  to  move  this function  call  in
+    # `InitSource()` so that  we only have to  write it once for  all sources of
+    # data  which  are  obtain  synchronously.  For  sources  of  data  obtained
+    # asynchronously, we must do it elsewhere; i.e. in `SetIntermediateSource()`
+    # and `SetFinalSource()`.
+    SetFilteredSource()
+enddef
+
+def SetFilteredSource() #{{{2
+    filtered_source = SOURCE
+        ->copy()
+        ->filter({_, v -> v.text =~ filter_text})
+    UpdatePopup()
+enddef
+
+def SetIntermediateSource(_c: channel, data: string) #{{{2
     var _data: string
     if incomplete != ''
         _data = incomplete .. data
@@ -255,22 +275,18 @@ def SetIntermediateTaglist(_c: channel, data: string) #{{{2
     # typed text  to be matched against  the filename.  Otherwise, we  might get
     # too many irrelevant results (test with the pattern "changes").
     #}}}
-    TAGLIST += splitted_data
+    SOURCE += splitted_data
         ->map({_, v -> split(v, '\t')})
         ->map({_, v -> #{text: v[0], trailing: v[1]}})
 
-    # need to be  set now, in case  we don't write any filtering  text, and just
+    # Need to be  set now, in case  we don't write any filtering  text, and just
     # press Enter  on whatever entry is  the first; otherwise, we  won't jump to
-    # the right tag
-    filtered_taglist = TAGLIST
-        ->copy()
-        ->filter({_, v -> v.text =~ filter_text})
-
-    UpdatePopup()
+    # the right tag.
+    SetFilteredSource()
 enddef
 var incomplete = ''
 
-def SetFinalTaglist(...l: any) #{{{2
+def SetFinalSource(...l: any) #{{{2
     # Wait for all callbacks to have been processed.{{{
     #
     # From `:h job-exit_cb`:
@@ -284,13 +300,19 @@ def SetFinalTaglist(...l: any) #{{{2
     #}}}
     sleep 1m
     var parts = split(incomplete, '\t')
-    TAGLIST += [#{text: parts[0], trailing: parts[1]}]
-    UpdatePopup()
+    # need to  be cleared now, otherwise,  the last help tag  will be duplicated
+    # the next time we run `:FuzzyHelp`
+    incomplete = ''
+    SOURCE += [#{text: parts[0], trailing: parts[1]->trim("\<c-j>")}]
+    #                                                     ^------^
+    #                        the last line of the shell ouput ends
+    #                        with an undesirable trailing newline
+    SetFilteredSource()
 enddef
 
-def FilterTags(id: number, key: string): bool #{{{2
+def FilterLines(id: number, key: string): bool #{{{2
 # Handle the keys typed in the popup menu.
-# Narrow down the tag names based on the keys typed so far.
+# Narrow down the lines based on the keys typed so far.
 
     # filter the names based on the typed key and keys typed before;
     # the pattern is taken from the regex used in the syntax group `helpHyperTextEntry`
@@ -313,14 +335,14 @@ def FilterTags(id: number, key: string): bool #{{{2
         endif
         return true
 
-    # select a neighboring tag
+    # select a neighboring line
     elseif index(["\<down>", "\<up>", "\<c-n>", "\<c-p>"], key) >= 0
-        # No need to update the popup if we try to move beyond the first/last tag.{{{
+        # No need to update the popup if we try to move beyond the first/last line.{{{
         #
         # Besides, if  you let Vim  update the popup  in those cases,  it causes
         # some  annoying flickering  in the  popup title  when we  keep pressing
         # `C-n` or `C-p` for a bit too long.  Note that `id` (function argument)
-        # and `tags_winid` (script local) have the same value.
+        # and `menu_winid` (script local) have the same value.
         #}}}
         if key == "\<up>" && line('.', id) == 1
         || key == "\<c-p>" && line('.', id) == 1
@@ -335,10 +357,10 @@ def FilterTags(id: number, key: string): bool #{{{2
 
     # allow for the preview to be scrolled
     elseif key == "\<m-j>" || key == "\<f21>"
-        win_execute(preview_winid, 'setl cul | norm! j')
+        win_execute(preview_winid, ['setl cul', 'norm! j'])
         return true
     elseif key == "\<m-k>" || key == "\<f22>"
-        win_execute(preview_winid, 'setl cul | norm! k')
+        win_execute(preview_winid, ['setl cul', 'norm! k'])
         return true
     # reset the cursor position in the preview popup
     elseif key == "\<m-r>" || key == "\<f29>"
@@ -360,20 +382,19 @@ def UpdatePopup(popup = true) #{{{2
     endif
 
     # no need to  update the preview on every keypress,  when we're typing fast;
-    # update only when we've  paused for at least 100ms; below  that, I doubt we
-    # will notice the preview's contents not being updated
+    # update only when we've paused for at least 50ms
     if preview_timer > 0
         timer_stop(preview_timer)
         preview_timer = 0
     endif
-    timer_start(100, {-> UpdatePreview()})
+    preview_timer = timer_start(50, {-> UpdatePreview()})
 
     UpdateTitle()
 enddef
 var preview_timer = 0
 
 def UpdateMain() #{{{2
-# update the popup with the new list of tag names
+# update the popup with the new list of lines
     var highlighted_lines: list<dict<any>>
     if filter_text =~ '\S'
         var matchfuzzypos: list<any>
@@ -410,102 +431,114 @@ def UpdateMain() #{{{2
         matchfuzzypos = tokens
             ->Permutations()
             ->map({_, v -> join(v, '')})
-            ->map({_, v -> matchfuzzypos(TAGLIST, v, #{key: 'text'})})
+            ->map({_, v -> matchfuzzypos(SOURCE, v, #{key: 'text'})})
             ->reduce({a, v -> [a[0] + v[0], a[1] + v[1]]})
 
         var pos: list<list<number>>
-        # Why using `filtered_taglist` to save `matchfuzzypos()`?{{{
+        # Why using `filtered_source` to save `matchfuzzypos()`?{{{
         #
-        # It needs  to be updated  now, so  that `JumpToTag()` jumps  to the
+        # It needs  to be  updated now,  so that  `ExitCallback()` jumps  to the
         # right tag later.
         #}}}
-        [filtered_taglist, pos] = matchfuzzypos
+        [filtered_source, pos] = matchfuzzypos
 
         # add info to get highlight via text properties
-        highlighted_lines = filtered_taglist
+        highlighted_lines = filtered_source
             ->map({i, v -> #{
-                text: v.text .. v.trailing,
+                text: v.text .. "\t" .. v.trailing,
                 props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyhelp'}}),
                 }})
     else
-        highlighted_lines = TAGLIST
+        highlighted_lines = SOURCE
             ->copy()
             ->map({_, v -> #{
-                text: v.text .. v.trailing,
+                text: v.text .. "\t" .. v.trailing,
                 props: [],
                 }})
     endif
-    popup_settext(tags_winid, highlighted_lines)
+    popup_settext(menu_winid, highlighted_lines)
     # select first entry after every change of the filtering text (to mimic what fzf does)
-    win_execute(tags_winid, 'norm! 1G')
+    win_execute(menu_winid, 'norm! 1G')
     echo 'Help tag: ' .. filter_text
 enddef
 
 def UpdatePreview() #{{{2
-    var matchlist = winbufnr(tags_winid)
-        ->getbufline(line('.', tags_winid))
-        ->matchlist('\(\S\+\)\s\+\(\S\+\)')
-    if matchlist == []
+    var splitted = winbufnr(menu_winid)
+        ->getbufline(line('.', menu_winid))
+        ->get(0, '')
+        ->split('\t')
+    var left = ''
+    var right = ''
+    if len(splitted) == 2
+        [left, right] = splitted
+    elseif len(splitted) == 1
+        left = splitted[0]
+    else
         return
     endif
+
     var filename: string
-    var tagname: string
-    [tagname, filename] = matchlist[1:2]
-    # Why passing "true, true" as argument to `globpath()`?{{{
-    #
-    # The  first  `true` can  be  useful  if  for  some reason  `'suffixes'`  or
-    # `'wildignore'` are misconfigured.
-    # The second  `true` is useful to  handle the case where  `globpath()` finds
-    # several files.  It's easier to extract the first one from a list than from
-    # a string.
-    #}}}
-    filename = globpath(&rtp, 'doc/' .. filename, true, true)->get(0, '')
-    # Why this check?{{{
-    #
-    # We  might have  a stale  `tags`  file somewhere  in our  rtp, which  might
-    # contain help tags which no longer exist.
-    # It   happened   once   with    `~/.vim/doc/tags`   which   contained   the
-    # `FastFold-commands` tag; the latter didn't exist anymore.
-    #
-    # When that happens, `readfile()` will raise `E484`.
-    #
-    #     E484: Can't open file <empty>
-    #}}}
-    if filename == ''
+    if sourcetype == 'help'
+        # Why passing "true, true" as argument to `globpath()`?{{{
+        #
+        # The  first  `true` can  be  useful  if  for  some reason  `'suffixes'`  or
+        # `'wildignore'` are misconfigured.
+        # The second  `true` is useful to  handle the case where  `globpath()` finds
+        # several files.  It's easier to extract the first one from a list than from
+        # a string.
+        #}}}
+        filename = globpath(&rtp, 'doc/' .. right, true, true)->get(0, '')
+    elseif sourcetype == 'recentfiles'
+        filename = expand(left)->fnamemodify(':p')
+    endif
+    if !filereadable(filename)
         return
     endif
+
     var text = readfile(filename)
     popup_settext(preview_winid, text)
 
-    # highlight the text with the help syntax plugin
-    var setsyntax = 'if get(b:, "current_syntax", "") != "help" | exe "do Syntax help" | endif'
-    tagname = substitute(tagname, "'", "''", 'g')->escape('\')
-    var searchcmd = printf("echo search('\\*\\V%s\\m\\*')", tagname)
-    # Why not just running `search()`?{{{
-    #
-    # If you just run `search()`, Vim won't redraw the preview popup.
-    # You'll need to run `:redraw`; but the latter causes some flicker (with the
-    # cursor, and in the statusline, tabline).
-    #}}}
-    var lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>")
-    var showtag = 'norm! ' .. lnum .. 'G'
-    var cmd = [setsyntax, '&l:cole = 3', showtag]
-    win_execute(preview_winid, cmd)
+    # syntax highlight the text and make sure the cursor is at the relevant location
+    if sourcetype == 'help'
+        var setsyntax = [
+            'if get(b:, "current_syntax", "") != "help"',
+            'do Syntax help',
+            'endif'
+            ]
+        var tagname = left->trim()->substitute("'", "''", 'g')->escape('\')
+        var searchcmd = printf("echo search('\\*\\V%s\\m\\*')", tagname)
+        # Why not just running `search()`?{{{
+        #
+        # If you just run `search()`, Vim won't redraw the preview popup.
+        # You'll need to run `:redraw`; but the latter causes some flicker (with the
+        # cursor, and in the statusline, tabline).
+        #}}}
+        var lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>")
+        var showtag = 'norm! ' .. lnum .. 'G'
+        win_execute(preview_winid, setsyntax + ['&l:cole = 3', showtag])
+
+    elseif sourcetype == 'recentfiles'
+        var setsyntax = ['do filetypedetect BufReadPost ' .. fnameescape(filename)]
+        win_execute(preview_winid, setsyntax + ['&l:cole = 3', 'norm! zR'])
+    endif
 enddef
 
 def UpdateTitle() #{{{2
-    if line('$', tags_winid) == 1 && winbufnr(tags_winid)->getbufline(1) == ['']
-        popup_setoptions(tags_winid, #{title: '0/0'})
+    if line('$', menu_winid) == 1 && winbufnr(menu_winid)->getbufline(1) == ['']
+        popup_setoptions(menu_winid, #{title: '0/0'})
         return
     endif
-    var newtitle = popup_getoptions(tags_winid).title
-        ->substitute('\d\+', line('.', tags_winid), '')
-        ->substitute('/\zs\d\+', line('$', tags_winid), '')
-        ->substitute('(\zs\d\+\ze)', len(TAGLIST), '')
-    popup_setoptions(tags_winid, #{title: newtitle})
+    var newtitle = popup_getoptions(menu_winid).title
+        ->substitute('\d\+', line('.', menu_winid), '')
+        ->substitute('/\zs\d\+', line('$', menu_winid), '')
+        ->substitute('(\zs\d\+\ze)', len(SOURCE), '')
+    popup_setoptions(menu_winid, #{title: newtitle})
 enddef
 
-def JumpToTag(id: number, result: number) #{{{2
+def ExitCallback(type: string, id: number, result: number) #{{{2
+    # If we don't clear  the source now, next time we start  a fuzzy command, it
+    # will keep looking in the same source, which might not be relevant anymore.
+    SOURCE = []
     popup_close(preview_winid)
     # clear the message displayed at the command-line
     echo ''
@@ -513,21 +546,32 @@ def JumpToTag(id: number, result: number) #{{{2
         return
     endif
     try
-        var tagname = filtered_taglist[result - 1].text->matchstr('\S\+')
-        exe 'h ' .. tagname
+        var chosen = filtered_source[result - 1].text
+            ->split('\t')
+            ->get(0, '')
+            ->trim()
+        if chosen == ''
+            return
+        endif
+        if type == 'help'
+            exe 'h ' .. chosen
+        elseif type == 'recentfiles'
+            exe 'sp ' .. chosen->fnameescape()
+            norm! zv
+        endif
     catch
         echohl ErrorMsg
         echom v:exception
         echohl NONE
     endtry
-    # TODO: Could `TAGLIST` increase Vim's memory footprint?  Should we unlet it now?{{{
+    # TODO: Could `SOURCE` increase Vim's memory footprint?  Should we unlet it now?{{{
     #
     # But even  if we want  to, we can't unlet  a script-local variable  in Vim9
     # script.  This begs another question; in  Vim9 script, is there a risk that
     # Vim's memory consumption increases when  we use a script-local variable as
     # a cache.
     #
-    # Idea: Move `TAGLIST` into a dictionary.
+    # Idea: Move `SOURCE` into a dictionary.
     # When you don't need it anymore, remove the key from the dictionary.
     #}}}
 enddef
@@ -554,6 +598,26 @@ def InsertItemAtAllPositions(item: string, l: list<string>): list<list<string>>
     # iterate over all the positions at which we can insert the item in the list
     for i in range(len(l) + 1)
         ret += [ (i == 0 ? [] : l[0 : i - 1]) + [item] + l[i : ] ]
+    endfor
+    return ret
+enddef
+
+def BuflistedSorted(): list<string> #{{{2
+    return getbufinfo(#{buflisted: true})
+        ->filter({_, v -> getbufvar(v.bufnr, '&buftype', '') == ''})
+        ->map({_, v -> #{bufnr: v.bufnr, lastused: v.lastused}})
+        ->sort({i, j -> j.lastused - i.lastused})
+        ->map({_, v -> bufname(v.bufnr)})
+enddef
+
+def Uniq(list: list<string>): list<string> #{{{2
+    var visited = {}
+    var ret = []
+    for path in list
+        if !empty(path) && !has_key(visited, path)
+            add(ret, path)
+            visited[path] = 1
+        endif
     endfor
     return ret
 enddef
