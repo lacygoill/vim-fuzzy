@@ -1,7 +1,15 @@
 vim9script
 
-# TODO: Feature request: a new builtin popup menu filter{{{
-# which would be different than the existing one in 2 fundamental ways:
+# I want to be able to edit my input!{{{
+#
+# For now, I don't know how to do that.
+#
+# We've only implemented 2 basic editing commands (`C-u` and `C-h`).
+# And we  simply use `:echo` to  give us some  visual feedback as to  what we've
+# typed so far.
+#
+# Suggestion1: Ask for a new builtin popup menu filter.
+# It would be different than the existing one in 2 fundamental ways:
 #
 #    - it would cause Vim to automatically create an extra popup, below the popup
 #      for which it filters the keypresses
@@ -10,32 +18,64 @@ vim9script
 #      typed so far in the extra popup, but only when it has changed (i.e. it would
 #      ignore motions)
 #
-# Could the extra  popup leverage the concept of  prompt buffer?  Alternatively,
-# we could do without an extra popup,  and just rely on the command-line...  But
-# it would be less  pretty (because the popup could be  far away), and confusing
-# (what you  type is not an  Ex command, but  some arbitrary text which  a popup
-# filter is going to process in some arbitrary way).
+# Maybe the extra  popup leverage the concept of  prompt buffer...
 #
-# ---
+# Suggestion2: There has been some discussion on Google regarding a feature
+# request originally posted on github:
+# https://github.com/vim/vim/issues/5639
+# https://groups.google.com/g/vim_dev/c/42DjcXhuVAE/m/8yzxkBysAQAJ
 #
-# With  our current  implementation,  which  relies on  a  simple `:echo`,  it's
-# confusing when the cursor is in the middle of the popup.
+# The original feature request was asking to make a popup window focusable.
+# At some point in  the discussion, someone mentions that it  would be useful to
+# implement a fuzzy finder:
 #
-# ---
+#    > For fuzzy finder style popup it also becomes important.
+#    > I have tried multiple approaches ie. using custom prompt similar to ctrlp,
+#    > denite style where the prompt is a buffer.
+#    > I'm leaning to denite style pattern but that means it won't work in popup.
+#    > vim-clap already seems to be hitting this issue.
 #
-# Our current simple  workaround (an `:echo`) does not  support complex editions
-# (like `C-w`, `M-d`, ...) or motions  (like `M-b`, `C-a`, ...). Besides, it's a
-# bit confusing because the cursor is not drawn next to what we're typing.
+# It has been acknowledged in the todo list.  From `:h todo /^Popup`
+#
+#    > Popup windows:
+#    > - Add a flag to make a popup window focusable?
+#
+# You could wait for this todo item  to be implemented, and test whether you can
+# use the new feature to get an editable prompt.
 #}}}
 
 if !executable('grep') || !executable('perl') || !executable('awk')
     echohl WarningMsg
-    echom ':FuzzyHelp requires grep and perl/awk'
+    echom ':Fuzzy* commands require grep and perl/awk'
     echohl None
     finish
 endif
 
-prop_type_add('fuzzyhelp', #{highlight: 'Title'})
+# TODO: Implement a mechanism which lets us mark multiple lines in the popup.
+# Use the sign column to display a sign besides any marked line.
+
+# TODO: Implement a  mechanism which  allows us  to run  arbitrary code  when we
+# press another key then Enter to close the popup.
+# For example,  if we press `C-q`,  we might want  all the selected lines  to be
+# used to populate the qfl.
+# Once done, post your solution here: <https://github.com/junegunn/fzf/issues/1885>
+
+# TODO: Implement `:FuzzyCommands`.
+# Also, consider implementing various `:FuzzyMappings`; one for each mode.
+
+# TODO: Implement `:FuzzyAutoCommands`.
+
+# TODO: Implement `:FuzzyFiles`.
+
+# TODO: Implement `:FuzzyGrep`.
+# https://vi.stackexchange.com/questions/10692/how-to-interactively-search-grep-with-vim/10693#10693
+#
+#     $ grep -RHn '.*' .
+#                      ^
+#                      Vim's cwd
+
+# TODO: Implement `:FuzzyBuffer`.
+# https://vi.stackexchange.com/questions/308/regex-that-prefers-shorter-matches-within-a-match-this-is-more-involved-than-n
 
 const TEXTWIDTH = 80
 # 2 popups = 4 borders
@@ -45,18 +85,13 @@ var filter_text = ''
 var preview_winid = 0
 var menu_winid = 0
 
-# TODO: There is some bug which prevents us from writing this:{{{
-#
-#     var SOURCE: list<dict<string>>
-#
-# https://github.com/vim/vim/issues/7064
-#}}}
-var SOURCE = []
+var source: list<dict<string>>
 var filtered_source: list<dict<string>>
 var sourcetype: string
+var mappings_mode = ''
 
 # Interface {{{1
-def fuzzy#main(type: string, pat_arg = '') #{{{2
+def fuzzy#main(type: string, _mappings_mode = '') #{{{2
     sourcetype = type
 
     var height = &lines / 3
@@ -76,14 +111,15 @@ def fuzzy#main(type: string, pat_arg = '') #{{{2
     enddef
     height -= Offset()
     if height <= 0
-        echo '[:FuzzyHelp] Not enough room'
+        echohl ErrorMsg
+        echom '[:Fuzzy' .. sourcetype .. '] Not enough room'
+        echohl NONE
         return
     endif
 
     var width = min([TEXTWIDTH, &columns - BORDERS])
     var line = &lines - &ch - statusline - height - 1
 
-    filter_text = pat_arg
     var opts = #{
         line: line,
         col: (&columns - TEXTWIDTH - BORDERS) / 2,
@@ -112,6 +148,14 @@ def fuzzy#main(type: string, pat_arg = '') #{{{2
 
     # create popup menu
     menu_winid = popup_menu('', opts)
+    prop_type_add('fuzzy', #{bufnr: winbufnr(menu_winid), highlight: 'Title'})
+    # highlight the location from which mappings have been installed
+    # TODO: It would  probably be better  to use text properties,  and highlight
+    # the `trailing` key.   It would give us the highlighting  for free, as long
+    # as we we properly set `trailing`.
+    if sourcetype == 'Mappings'
+        matchadd('Comment', '\S\+:\d\+$', 10, -1, #{window: menu_winid})
+    endif
 
     # create preview
     opts = popup_getoptions(menu_winid)
@@ -122,16 +166,27 @@ def fuzzy#main(type: string, pat_arg = '') #{{{2
     remove(opts, 'title')
     preview_winid = popup_create('', opts)
 
+    mappings_mode = _mappings_mode
     InitSource()
 enddef
 #}}}1
 # Core {{{1
 def InitSource() #{{{2
-    if sourcetype == 'help'
+    if sourcetype == 'Help'
         InitHelpTags()
-    elseif sourcetype == 'recentfiles'
+    elseif sourcetype == 'Mappings'
+        InitMappings()
+    elseif sourcetype == 'RecentFiles'
         InitRecentFiles()
     endif
+
+    # For   sources   of   data   obtained  asynchronously,   we   must   invoke
+    # `SetFilteredSource()`   from  elsewhere:    `SetIntermediateSource()`  and
+    # `SetFinalSource()`.
+    if index(['Help'], sourcetype) >= 0
+        return
+    endif
+    SetFilteredSource()
 enddef
 
 def InitHelpTags() #{{{2
@@ -230,25 +285,62 @@ def InitHelpTags() #{{{2
         })
 enddef
 
+def InitMappings() #{{{2
+    source = execute('verb ' .. mappings_mode .. 'map')
+        # remove first empty lines
+        ->substitute('^\%(\s*\n\)*', '', '')
+        # split after every "Last set from ..." line
+        ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
+        # transforms each pair of lines into a dictionary
+        ->map({_, v -> #{
+            # `matchstr()` removes the mode (`n`, `nox`, ...).{{{
+            # `substitute()` removes some special characters:
+            #
+            #     x  =rd         *@:RefDot<CR>
+            #                    ^^
+            #                    noise
+            #}}}
+            text: matchstr(v, '...\zs[^\n]*')->substitute('^\S*\s\+\zs[*&]\=[@ ]\=', '', ''),
+            # `matchstr()` extracts the filename.{{{
+            #
+            #     Last set from /path/to/script.vim line 123
+            #                            ^--------^
+            #
+            # And `substitute()` replaces ` line 123` into `:123`.
+            #}}}
+            trailing: "\t" .. matchstr(v, '/\zs[^/\\]*$')->substitute(' [^ ]* ', ':', '')
+            }})
+
+    # align all the lhs in a field (max 35 cells)
+    var longest_lhs = source
+        ->deepcopy()
+        ->map({_, v -> v.text->matchstr('^\S*')->strchars(true)})
+        ->max()
+    longest_lhs = min([35, longest_lhs])
+    source->map({_, v -> extend(v, #{
+        text: matchstr(v.text, '^\S*')->printf('%-' .. longest_lhs .. 'S')
+            .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
+        })})
+
+    # TODO: For each mapping, make the preview display where it's installed from.
+    # Also, make the preview window include a title which displays the path to the file.
+    # This could be  useful when the mapping  is so long that we  can't see from
+    # where it's installed in the main popup.
+enddef
+
 def InitRecentFiles() #{{{2
-    var source: list<string> = BuflistedSorted()
+    var recentfiles: list<string> = BuflistedSorted()
         + copy(v:oldfiles)->filter({_, v -> expand(v)->filereadable()})
-    map(source, {_, v -> fnamemodify(v, ':p')})
+    map(recentfiles, {_, v -> fnamemodify(v, ':p')})
     var curbuf = expand('%:p')
-    SOURCE = source
-        ->filter({_, v -> v != '' && v != curbuf})
+    source = recentfiles
+        ->filter({_, v -> v != '' && v != curbuf && !isdirectory(v)})
         ->Uniq()
         ->map({_, v -> #{text: fnamemodify(v, ':~:.'), trailing: ''}})
-    # TODO: In  the  future, you  might  want  to  move  this function  call  in
-    # `InitSource()` so that  we only have to  write it once for  all sources of
-    # data  which  are  obtain  synchronously.  For  sources  of  data  obtained
-    # asynchronously, we must do it elsewhere; i.e. in `SetIntermediateSource()`
-    # and `SetFinalSource()`.
-    SetFilteredSource()
 enddef
 
 def SetFilteredSource() #{{{2
-    filtered_source = SOURCE
+    filtered_source = source
         ->copy()
         ->filter({_, v -> v.text =~ filter_text})
     UpdatePopup()
@@ -275,7 +367,7 @@ def SetIntermediateSource(_c: channel, data: string) #{{{2
     # typed text  to be matched against  the filename.  Otherwise, we  might get
     # too many irrelevant results (test with the pattern "changes").
     #}}}
-    SOURCE += splitted_data
+    source += splitted_data
         ->map({_, v -> split(v, '\t')})
         ->map({_, v -> #{text: v[0], trailing: v[1]}})
 
@@ -303,7 +395,7 @@ def SetFinalSource(...l: any) #{{{2
     # need to  be cleared now, otherwise,  the last help tag  will be duplicated
     # the next time we run `:FuzzyHelp`
     incomplete = ''
-    SOURCE += [#{text: parts[0], trailing: parts[1]->trim("\<c-j>")}]
+    source += [#{text: parts[0], trailing: parts[1]->trim("\<c-j>")}]
     #                                                     ^------^
     #                        the last line of the shell ouput ends
     #                        with an undesirable trailing newline
@@ -424,6 +516,9 @@ def UpdateMain() #{{{2
         # `matchfuzzypos()` to be  invoked 6 times, which  is already noticeable
         # (i.e. a keypress slightly lags when you have 3 tokens).
         #}}}
+        # TODO: This might be too slow when there are a lot of lines.
+        # You might want  to replace `4` with a number  which takes into account
+        # the type of source, or better yet, the number of lines.
         if len(tokens) >= 4
             var rest = tokens[2:]->join()->substitute('\s\+', '', 'g')
             tokens = [tokens[0], tokens[1], rest]
@@ -431,7 +526,7 @@ def UpdateMain() #{{{2
         matchfuzzypos = tokens
             ->Permutations()
             ->map({_, v -> join(v, '')})
-            ->map({_, v -> matchfuzzypos(SOURCE, v, #{key: 'text'})})
+            ->map({_, v -> matchfuzzypos(source, v, #{key: 'text'})})
             ->reduce({a, v -> [a[0] + v[0], a[1] + v[1]]})
 
         var pos: list<list<number>>
@@ -446,10 +541,10 @@ def UpdateMain() #{{{2
         highlighted_lines = filtered_source
             ->map({i, v -> #{
                 text: v.text .. "\t" .. v.trailing,
-                props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyhelp'}}),
+                props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzy'}}),
                 }})
     else
-        highlighted_lines = SOURCE
+        highlighted_lines = source
             ->copy()
             ->map({_, v -> #{
                 text: v.text .. "\t" .. v.trailing,
@@ -459,7 +554,16 @@ def UpdateMain() #{{{2
     popup_settext(menu_winid, highlighted_lines)
     # select first entry after every change of the filtering text (to mimic what fzf does)
     win_execute(menu_winid, 'norm! 1G')
-    echo 'Help tag: ' .. filter_text
+
+    echohl ModeMsg
+    if sourcetype == 'Mappings'
+        echo sourcetype .. ' (' .. mappings_mode .. '): '
+    else
+        echo sourcetype->substitute('\l\zs\ze\u', ' ', 'g') .. ': '
+    endif
+    echohl Title
+    echon filter_text
+    echohl NONE
 enddef
 
 def UpdatePreview() #{{{2
@@ -478,7 +582,7 @@ def UpdatePreview() #{{{2
     endif
 
     var filename: string
-    if sourcetype == 'help'
+    if sourcetype == 'Help'
         # Why passing "true, true" as argument to `globpath()`?{{{
         #
         # The  first  `true` can  be  useful  if  for  some reason  `'suffixes'`  or
@@ -488,7 +592,7 @@ def UpdatePreview() #{{{2
         # a string.
         #}}}
         filename = globpath(&rtp, 'doc/' .. right, true, true)->get(0, '')
-    elseif sourcetype == 'recentfiles'
+    elseif sourcetype == 'RecentFiles'
         filename = expand(left)->fnamemodify(':p')
     endif
     if !filereadable(filename)
@@ -499,7 +603,7 @@ def UpdatePreview() #{{{2
     popup_settext(preview_winid, text)
 
     # syntax highlight the text and make sure the cursor is at the relevant location
-    if sourcetype == 'help'
+    if sourcetype == 'Help'
         var setsyntax = [
             'if get(b:, "current_syntax", "") != "help"',
             'do Syntax help',
@@ -517,28 +621,54 @@ def UpdatePreview() #{{{2
         var showtag = 'norm! ' .. lnum .. 'G'
         win_execute(preview_winid, setsyntax + ['&l:cole = 3', showtag])
 
-    elseif sourcetype == 'recentfiles'
-        var setsyntax = ['do filetypedetect BufReadPost ' .. fnameescape(filename)]
+    elseif sourcetype == 'RecentFiles'
+        # Why clearing the syntax first?{{{
+        #
+        # Suppose the previous file which was previewed was a Vim file.
+        # A whole bunch of Vim syntax items are currently defined.
+        #
+        # Now, suppose  the current file which  is previewed is a  simple `.txt`
+        # file; `do filetypedetect BufReadPost`  won't install new syntax items,
+        # and won't  clear the  old ones;  IOW, your text  file will  be wrongly
+        # highlighted with the Vim syntax.
+        #}}}
+        var setsyntax = ['syn clear | do filetypedetect BufReadPost ' .. fnameescape(filename)]
         win_execute(preview_winid, setsyntax + ['&l:cole = 3', 'norm! zR'])
     endif
 enddef
 
 def UpdateTitle() #{{{2
+    # Special case:  no line matches what we've typed so far.
     if line('$', menu_winid) == 1 && winbufnr(menu_winid)->getbufline(1) == ['']
-        popup_setoptions(menu_winid, #{title: '0/0'})
+        # Warning: It's important that even if no line matches, the title still respects the format `12/34 (56)`.{{{
+        #
+        # Otherwise, after pressing `C-u`, the title will still not respect the format.
+        # That's  also why  we don't  reset the  whole title.   We just  replace
+        # `12/34` with `0/0`; this way, we can  be sure that any space used as a
+        # padding is preserved.
+        #}}}
+        var newtitle = popup_getoptions(menu_winid).title
+            ->substitute('\d\+/\d\+', '0/0', '')
+        popup_setoptions(menu_winid, #{title: newtitle})
         return
     endif
     var newtitle = popup_getoptions(menu_winid).title
         ->substitute('\d\+', line('.', menu_winid), '')
         ->substitute('/\zs\d\+', line('$', menu_winid), '')
-        ->substitute('(\zs\d\+\ze)', len(SOURCE), '')
+        ->substitute('(\zs\d\+\ze)', len(source), '')
     popup_setoptions(menu_winid, #{title: newtitle})
 enddef
 
 def ExitCallback(type: string, id: number, result: number) #{{{2
     # If we don't clear  the source now, next time we start  a fuzzy command, it
     # will keep looking in the same source, which might not be relevant anymore.
-    SOURCE = []
+    source = []
+    # Similarly, we need to  reset `filter_text` so that the next  time we run a
+    # fuzzy  command, we  don't start  re-using the  same typed  text as  before
+    # (which could  be completely irrelevant,  especially if we use  a different
+    # command).
+    filter_text = ''
+
     popup_close(preview_winid)
     # clear the message displayed at the command-line
     echo ''
@@ -553,9 +683,9 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
         if chosen == ''
             return
         endif
-        if type == 'help'
+        if type == 'Help'
             exe 'h ' .. chosen
-        elseif type == 'recentfiles'
+        elseif type == 'RecentFiles'
             exe 'sp ' .. chosen->fnameescape()
             norm! zv
         endif
@@ -564,14 +694,14 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
         echom v:exception
         echohl NONE
     endtry
-    # TODO: Could `SOURCE` increase Vim's memory footprint?  Should we unlet it now?{{{
+    # TODO: Could `source` increase Vim's memory footprint?  Should we unlet it now?{{{
     #
     # But even  if we want  to, we can't unlet  a script-local variable  in Vim9
     # script.  This begs another question; in  Vim9 script, is there a risk that
     # Vim's memory consumption increases when  we use a script-local variable as
     # a cache.
     #
-    # Idea: Move `SOURCE` into a dictionary.
+    # Idea: Move `source` into a dictionary.
     # When you don't need it anymore, remove the key from the dictionary.
     #}}}
 enddef
@@ -606,7 +736,10 @@ def BuflistedSorted(): list<string> #{{{2
     return getbufinfo(#{buflisted: true})
         ->filter({_, v -> getbufvar(v.bufnr, '&buftype', '') == ''})
         ->map({_, v -> #{bufnr: v.bufnr, lastused: v.lastused}})
-        ->sort({i, j -> j.lastused - i.lastused})
+        # the most recently active buffers first;
+        # for 2 buffers accessed in the same second, the one with the bigger number first
+        # (because it's the most recently created one)
+        ->sort({i, j -> i.lastused < j.lastused ? 1 : i.lastused == j.lastused ? j.bufnr - i.bufnr : -1})
         ->map({_, v -> bufname(v.bufnr)})
 enddef
 
