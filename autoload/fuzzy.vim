@@ -60,11 +60,6 @@ endif
 # used to populate the qfl.
 # Once done, post your solution here: <https://github.com/junegunn/fzf/issues/1885>
 
-# TODO: Implement `:FuzzyCommands`.
-# Also, consider implementing various `:FuzzyMappings`; one for each mode.
-
-# TODO: Implement `:FuzzyAutoCommands`.
-
 # TODO: Implement `:FuzzyFiles`.
 
 # TODO: Implement `:FuzzyGrep`.
@@ -76,6 +71,15 @@ endif
 
 # TODO: Implement `:FuzzyBuffer`.
 # https://vi.stackexchange.com/questions/308/regex-that-prefers-shorter-matches-within-a-match-this-is-more-involved-than-n
+# And maybe  `:FuzzyBuffers` (note the final  "s") to find some  needle in *all*
+# the buffers.
+
+# TODO: Implement `:FuzzySnippets`?
+
+# TODO: Get rid of the Vim plugins fzf and fzf.vim.
+# Get rid of their config in `~/.vim/plugin` and/or `~/.vim/after/plugin`.
+# Get rid of anything we've written about these plugins in our notes.
+# Update the `~/bin/up` script so that it updates the fzf binary.
 
 const TEXTWIDTH = 80
 # 2 popups = 4 borders
@@ -88,10 +92,9 @@ var menu_winid = 0
 var source: list<dict<string>>
 var filtered_source: list<dict<string>>
 var sourcetype: string
-var mappings_mode = ''
 
 # Interface {{{1
-def fuzzy#main(type: string, _mappings_mode = '') #{{{2
+def fuzzy#main(type: string) #{{{2
     sourcetype = type
 
     var height = &lines / 3
@@ -148,14 +151,8 @@ def fuzzy#main(type: string, _mappings_mode = '') #{{{2
 
     # create popup menu
     menu_winid = popup_menu('', opts)
-    prop_type_add('fuzzy', #{bufnr: winbufnr(menu_winid), highlight: 'Title'})
-    # highlight the location from which mappings have been installed
-    # TODO: It would  probably be better  to use text properties,  and highlight
-    # the `trailing` key.   It would give us the highlighting  for free, as long
-    # as we we properly set `trailing`.
-    if sourcetype == 'Mappings'
-        matchadd('Comment', '\S\+:\d\+$', 10, -1, #{window: menu_winid})
-    endif
+    prop_type_add('fuzzyMatch', #{bufnr: winbufnr(menu_winid), highlight: 'Title'})
+    prop_type_add('fuzzyTrailing', #{bufnr: winbufnr(menu_winid), highlight: 'Comment'})
 
     # create preview
     opts = popup_getoptions(menu_winid)
@@ -166,16 +163,15 @@ def fuzzy#main(type: string, _mappings_mode = '') #{{{2
     remove(opts, 'title')
     preview_winid = popup_create('', opts)
 
-    mappings_mode = _mappings_mode
     InitSource()
 enddef
 #}}}1
 # Core {{{1
 def InitSource() #{{{2
-    if sourcetype == 'Help'
+    if sourcetype == 'Commands' || sourcetype =~ '^Mappings'
+        InitCommandsOrMappings()
+    elseif sourcetype == 'Help'
         InitHelpTags()
-    elseif sourcetype == 'Mappings'
-        InitMappings()
     elseif sourcetype == 'RecentFiles'
         InitRecentFiles()
     endif
@@ -187,6 +183,83 @@ def InitSource() #{{{2
         return
     endif
     SetFilteredSource()
+enddef
+
+def InitCommandsOrMappings() #{{{2
+    var cmd: string
+    var relevant: string
+    var noise: string
+    if sourcetype == 'Commands'
+        cmd = 'verb com'
+        # The first 4 characters are used for flags, and what comes after the newline is irrelevant.{{{
+        #
+        #     !"b|SomeCmd ...
+        #     ^--^
+        #}}}
+        relevant = '....\zs[^\n]*'
+        # We're only interested in the command name and its definition; all the other fields are noise.{{{
+        #
+        #     SomeCmd    ?    .  win    customlist    ...
+        #                │    ├────┘    ├────────┘
+        #                │    │         └ Complete
+        #                │    └ Address
+        #                └ Args
+        #}}}
+        noise = '^\S*\zs.*\ze\%43c.*'
+    elseif sourcetype =~ '^Mappings'
+        cmd = 'verb ' .. sourcetype[-2:-2]->tolower() .. 'map'
+        # The first 3 characters are used for the mode.{{{
+        #
+        #     nox<key> ...
+        #     ^^^
+        #}}}
+        relevant = '...\zs[^\n]*'
+        # Some flags might be present.{{{
+        #
+        #     x  =rd         *@:RefDot<CR>
+        #                    ^^
+        #                    noise
+        #}}}
+        noise = '^\S*\s\+\zs[*&]\=[@ ]\='
+    endif
+    source = execute(cmd)
+        # remove first empty lines
+        ->substitute('^\%(\s*\n\)*', '', '')
+        # split after every "Last set from ..." line
+        ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
+        # transforms each pair of lines into a dictionary
+        ->map({_, v -> #{
+            text: matchstr(v, relevant)->substitute(noise, '', ''),
+            # `matchstr()` extracts the filename.{{{
+            #
+            #     Last set from /path/to/script.vim line 123
+            #                            ^--------^
+            #
+            # And `substitute()` replaces ` line 123` into `:123`.
+            #}}}
+            trailing: matchstr(v, '/\zs[^/\\]*$')->substitute(' [^ ]* ', ':', ''),
+            # don't `expand()` right now; it's a little costly
+            location: matchstr(v, 'Last set from .* line \d\+$'),
+            }})
+
+    if sourcetype == 'Commands'
+        # Remove heading:{{{
+        #
+        #     Name              Args Address Complete    Definition
+        #}}}
+        remove(source, 0)
+    endif
+
+    # align all the names of commands/mappings in a field (max 35 cells)
+    var longest_name = source
+        ->copy()
+        ->map({_, v -> v.text->matchstr('^\S*')->strchars(true)})
+        ->max()
+    longest_name = min([35, longest_name])
+    source->map({_, v -> extend(v, #{
+        text: matchstr(v.text, '^\S*')->printf('%-' .. longest_name .. 'S')
+            .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
+        })})
 enddef
 
 def InitHelpTags() #{{{2
@@ -285,49 +358,6 @@ def InitHelpTags() #{{{2
         })
 enddef
 
-def InitMappings() #{{{2
-    source = execute('verb ' .. mappings_mode .. 'map')
-        # remove first empty lines
-        ->substitute('^\%(\s*\n\)*', '', '')
-        # split after every "Last set from ..." line
-        ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
-        # transforms each pair of lines into a dictionary
-        ->map({_, v -> #{
-            # `matchstr()` removes the mode (`n`, `nox`, ...).{{{
-            # `substitute()` removes some special characters:
-            #
-            #     x  =rd         *@:RefDot<CR>
-            #                    ^^
-            #                    noise
-            #}}}
-            text: matchstr(v, '...\zs[^\n]*')->substitute('^\S*\s\+\zs[*&]\=[@ ]\=', '', ''),
-            # `matchstr()` extracts the filename.{{{
-            #
-            #     Last set from /path/to/script.vim line 123
-            #                            ^--------^
-            #
-            # And `substitute()` replaces ` line 123` into `:123`.
-            #}}}
-            trailing: "\t" .. matchstr(v, '/\zs[^/\\]*$')->substitute(' [^ ]* ', ':', '')
-            }})
-
-    # align all the lhs in a field (max 35 cells)
-    var longest_lhs = source
-        ->deepcopy()
-        ->map({_, v -> v.text->matchstr('^\S*')->strchars(true)})
-        ->max()
-    longest_lhs = min([35, longest_lhs])
-    source->map({_, v -> extend(v, #{
-        text: matchstr(v.text, '^\S*')->printf('%-' .. longest_lhs .. 'S')
-            .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
-        })})
-
-    # TODO: For each mapping, make the preview display where it's installed from.
-    # Also, make the preview window include a title which displays the path to the file.
-    # This could be  useful when the mapping  is so long that we  can't see from
-    # where it's installed in the main popup.
-enddef
-
 def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
         + copy(v:oldfiles)->filter({_, v -> expand(v)->filereadable()})
@@ -336,7 +366,7 @@ def InitRecentFiles() #{{{2
     source = recentfiles
         ->filter({_, v -> v != '' && v != curbuf && !isdirectory(v)})
         ->Uniq()
-        ->map({_, v -> #{text: fnamemodify(v, ':~:.'), trailing: ''}})
+        ->map({_, v -> #{text: fnamemodify(v, ':~:.'), trailing: '', location: ''}})
 enddef
 
 def SetFilteredSource() #{{{2
@@ -369,7 +399,7 @@ def SetIntermediateSource(_c: channel, data: string) #{{{2
     #}}}
     source += splitted_data
         ->map({_, v -> split(v, '\t')})
-        ->map({_, v -> #{text: v[0], trailing: v[1]}})
+        ->map({_, v -> #{text: v[0], trailing: v[1], location: ''}})
 
     # Need to be  set now, in case  we don't write any filtering  text, and just
     # press Enter  on whatever entry is  the first; otherwise, we  won't jump to
@@ -395,7 +425,7 @@ def SetFinalSource(...l: any) #{{{2
     # need to  be cleared now, otherwise,  the last help tag  will be duplicated
     # the next time we run `:FuzzyHelp`
     incomplete = ''
-    source += [#{text: parts[0], trailing: parts[1]->trim("\<c-j>")}]
+    source += [#{text: parts[0], trailing: parts[1]->trim("\<c-j>"), location: ''}]
     #                                                     ^------^
     #                        the last line of the shell ouput ends
     #                        with an undesirable trailing newline
@@ -541,14 +571,17 @@ def UpdateMain() #{{{2
         highlighted_lines = filtered_source
             ->map({i, v -> #{
                 text: v.text .. "\t" .. v.trailing,
-                props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzy'}}),
+                props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyMatch'}})
+                    + [#{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
+                location: v.location,
                 }})
     else
         highlighted_lines = source
             ->copy()
             ->map({_, v -> #{
                 text: v.text .. "\t" .. v.trailing,
-                props: [],
+                props: [#{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
+                location: v.location,
                 }})
     endif
     popup_settext(menu_winid, highlighted_lines)
@@ -556,11 +589,7 @@ def UpdateMain() #{{{2
     win_execute(menu_winid, 'norm! 1G')
 
     echohl ModeMsg
-    if sourcetype == 'Mappings'
-        echo sourcetype .. ' (' .. mappings_mode .. '): '
-    else
-        echo sourcetype->substitute('\l\zs\ze\u', ' ', 'g') .. ': '
-    endif
+    echo sourcetype->substitute('\l\zs\ze\u', ' ', 'g') .. ': '
     echohl Title
     echon filter_text
     echohl NONE
@@ -570,7 +599,7 @@ def UpdatePreview() #{{{2
     var splitted = winbufnr(menu_winid)
         ->getbufline(line('.', menu_winid))
         ->get(0, '')
-        ->split('\t')
+        ->split('\t\+')
     var left = ''
     var right = ''
     if len(splitted) == 2
@@ -582,6 +611,7 @@ def UpdatePreview() #{{{2
     endif
 
     var filename: string
+    var lnum: string
     if sourcetype == 'Help'
         # Why passing "true, true" as argument to `globpath()`?{{{
         #
@@ -594,6 +624,12 @@ def UpdatePreview() #{{{2
         filename = globpath(&rtp, 'doc/' .. right, true, true)->get(0, '')
     elseif sourcetype == 'RecentFiles'
         filename = expand(left)->fnamemodify(':p')
+    elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
+        [filename, lnum] = filtered_source
+            ->get(line('.', menu_winid) - 1, {})
+            ->get('location', '')
+            ->matchlist('Last set from \(.*\) line \(\d\+\)$')[1:2]
+        filename = expand(filename)
     endif
     if !filereadable(filename)
         return
@@ -601,6 +637,26 @@ def UpdatePreview() #{{{2
 
     var text = readfile(filename)
     popup_settext(preview_winid, text)
+    # TODO: The preview window's title should  display the path to the previewed
+    # file (at least for mappings; not sure about the other types of sources).
+
+    def Prettify()
+        # Why clearing the syntax first?{{{
+        #
+        # Suppose the previous file which was previewed was a Vim file.
+        # A whole bunch of Vim syntax items are currently defined.
+        #
+        # Now, suppose  the current file which  is previewed is a  simple `.txt`
+        # file; `do filetypedetect BufReadPost`  won't install new syntax items,
+        # and won't  clear the  old ones;  IOW, your text  file will  be wrongly
+        # highlighted with the Vim syntax.
+        #}}}
+        var setsyntax = 'syn clear | do filetypedetect BufReadPost ' .. fnameescape(filename)
+        var fullconceal = '&l:cole = 3'
+        var unfold = 'norm! zR'
+        var whereAmI = sourcetype == 'Commands' || sourcetype =~ '^Mappings' ? '&l:cul = 1' : ''
+        win_execute(preview_winid, [setsyntax, fullconceal, unfold, whereAmI])
+    enddef
 
     # syntax highlight the text and make sure the cursor is at the relevant location
     if sourcetype == 'Help'
@@ -617,25 +673,19 @@ def UpdatePreview() #{{{2
         # You'll need to run `:redraw`; but the latter causes some flicker (with the
         # cursor, and in the statusline, tabline).
         #}}}
-        var lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>")
+        lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>")
         var showtag = 'norm! ' .. lnum .. 'G'
         win_execute(preview_winid, setsyntax + ['&l:cole = 3', showtag])
 
+    elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
+        win_execute(preview_winid, 'norm! ' .. lnum .. 'Gzz')
+        Prettify()
+
     elseif sourcetype == 'RecentFiles'
-        # Why clearing the syntax first?{{{
-        #
-        # Suppose the previous file which was previewed was a Vim file.
-        # A whole bunch of Vim syntax items are currently defined.
-        #
-        # Now, suppose  the current file which  is previewed is a  simple `.txt`
-        # file; `do filetypedetect BufReadPost`  won't install new syntax items,
-        # and won't  clear the  old ones;  IOW, your text  file will  be wrongly
-        # highlighted with the Vim syntax.
-        #}}}
-        var setsyntax = ['syn clear | do filetypedetect BufReadPost ' .. fnameescape(filename)]
-        win_execute(preview_winid, setsyntax + ['&l:cole = 3', 'norm! zR'])
+        Prettify()
     endif
 enddef
+
 
 def UpdateTitle() #{{{2
     # Special case:  no line matches what we've typed so far.
@@ -688,6 +738,13 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
         elseif type == 'RecentFiles'
             exe 'sp ' .. chosen->fnameescape()
             norm! zv
+        elseif type == 'Commands' || type =~ '^Mappings'
+            var filename: string
+            var lnum: string
+            [filename, lnum] = matchlist(filtered_source[result - 1].location,
+                'Last set from \(.*\) line \(\d\+\)$')[1:2]
+            exe 'sp ' .. filename
+            exe 'norm! ' .. lnum .. 'Gzv'
         endif
     catch
         echohl ErrorMsg
