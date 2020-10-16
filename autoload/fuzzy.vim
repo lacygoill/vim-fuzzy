@@ -975,7 +975,8 @@ def Clean(closemenu = false) #{{{2
 enddef
 
 def GetFindCmd(): string #{{{2
-    var tokens = split(&wig, ',')
+    # split before any comma which is not preceded by an odd number of backslashes
+    var tokens = split(&wig, '\%(\\\@<!\\\%(\\\\\)*\\\@!\)\@<!,')
 
     # ignore files whose name is present in `'wildignore'` (e.g. `tags`)
     var by_name = tokens
