@@ -372,7 +372,7 @@ def InitFiles() #{{{2
     # the start of the source is the same (so filtering it again is useless).
     #}}}
     var findcmd = GetFindCmd()
-    job = job_start(['/bin/sh', '-c', findcmd], #{
+    myjob = job_start(['/bin/sh', '-c', findcmd], #{
         out_cb: SetIntermediateSource,
         exit_cb: SetFinalSource,
         mode: 'raw',
@@ -380,25 +380,7 @@ def InitFiles() #{{{2
         })
 enddef
 
-# TODO: Remove the assignment (but keep the declaration) once this issue is fixed:{{{
-#
-# https://github.com/vim/vim/issues/7158
-#
-# Right now, if you just declare the variable:
-#
-#     var job: job
-#
-# An error  will be raised  in `ExitCallback()` if  you've used a  mapping which
-# does not start a job:
-#
-#     E916: not a valid job
-#
-# You can't use `silent!`, so you'll need to use a try/catch.
-# But  the latter  causes  another issue;  an Enter  keypress  is not  correctly
-# discarded by the popup  filter.  As a result, when we jump to  a help tag, the
-# cursor is wrongly positioned 1 line below the tag.
-#}}}
-var job = job_start(':')
+var myjob: job
 
 def InitHelpTags() #{{{2
     var tagfiles = globpath(&rtp, 'doc/tags', true, true)
@@ -786,7 +768,7 @@ def UpdatePreview(timerid = 0) #{{{2
     elseif sourcetype == 'Files' || sourcetype == 'RecentFiles'
         filename = ExpandTilde(left)->fnamemodify(':p')
     elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
-        var matchlist = filtered_source
+        var matchlist = (filtered_source ?? source)
             ->get(line('.', menu_winid) - 1, {})
             ->get('location', '')
             ->matchlist('Last set from \(.*\) line \(\d\+\)$')
@@ -879,10 +861,15 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
             exe 'h ' .. chosen
 
         elseif type == 'Commands' || type =~ '^Mappings'
+            var matchlist = get(filtered_source ?? source, result - 1, {})
+                ->get('location')
+                ->matchlist('Last set from \(.*\) line \(\d\+\)$')
+            if len(matchlist) < 3
+                return
+            endif
             var filename: string
             var lnum: string
-            [filename, lnum] = matchlist(filtered_source[result - 1].location,
-                'Last set from \(.*\) line \(\d\+\)$')[1:2]
+            [filename, lnum] = matchlist[1:2]
             exe 'sp ' .. filename
             exe 'norm! ' .. lnum .. 'G'
         endif
@@ -977,7 +964,9 @@ def Clean(closemenu = false) #{{{2
     # the job  makes certain assumptions  (like the existence of  popups); let's
     # stop it  first, to avoid  any issue if we  break one of  these assumptions
     # later
-    job_stop(job)
+    if job_status(myjob) == 'run'
+        job_stop(myjob)
+    endif
 
     popup_close(preview_winid)
     if closemenu
