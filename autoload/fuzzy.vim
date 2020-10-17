@@ -189,6 +189,24 @@ enddef
 #}}}1
 # Core {{{1
 def InitSource() #{{{2
+    # Without this reset, we might wrongly re-use a stale source.{{{
+    #
+    #     $ cd && vim
+    #     " press:  SPC ff C-c
+    #     :cd /etc
+    #     " press:  SPC ff
+    #     " expected: the files of `/etc` are listed
+    #     " actual: some of the files of the home directory are listed
+    #}}}
+    #   But we already invoke `Reset()` from `Clean()`, isn't that enough?{{{
+    #
+    # It's true  that we invoke  `Clean()` from `ExitCallback()`;  and `Clean()`
+    # does indeed invoke `Reset()`.
+    # However, when you  press exit the main popup before  the job has finished,
+    # some of its callbacks can still be invoked and set `source`.
+    #}}}
+    Reset()
+
     if sourcetype == 'Commands' || sourcetype =~ '^Mappings'
         InitCommandsOrMappings()
     elseif sourcetype == 'Files'
@@ -336,15 +354,51 @@ def InitFiles() #{{{2
     # whether `filter_text` has changed).  If so, it would bail out, and restart
     # a new  timer.  The callback  would run its code  only if nothing  has been
     # typed.
+    #
+    # ---
+    #
+    # I  suspect  the  current  implementation is  inefficient,  and  that  some
+    # entries  are   uselessly  filtered  several  times.    For  example,  when
+    # `SetIntermediateSource()`  is invoked  the second  time, and  appends some
+    # lines in `source`, it invokes:
+    #
+    #    1. UpdatePopups()
+    #    2. UpdateMainText()
+    #    3. matchfuzzypos()
+    #
+    # I suspect that `matchfuzzypos()` re-filters the same lines that it already
+    # filtered when `SetIntermediateSource()` invoked it the first time.
+    # I mean, some  of the lines are  new (so filtering them  is necessary), but
+    # the start of the source is the same (so filtering it again is useless).
     #}}}
     var findcmd = GetFindCmd()
-    job_start(['/bin/sh', '-c', findcmd], #{
+    job = job_start(['/bin/sh', '-c', findcmd], #{
         out_cb: SetIntermediateSource,
         exit_cb: SetFinalSource,
         mode: 'raw',
         noblock: true,
         })
 enddef
+
+# TODO: Remove the assignment (but keep the declaration) once this issue is fixed:{{{
+#
+# https://github.com/vim/vim/issues/7158
+#
+# Right now, if you just declare the variable:
+#
+#     var job: job
+#
+# An error  will be raised  in `ExitCallback()` if  you've used a  mapping which
+# does not start a job:
+#
+#     E916: not a valid job
+#
+# You can't use `silent!`, so you'll need to use a try/catch.
+# But  the latter  causes  another issue;  an Enter  keypress  is not  correctly
+# discarded by the popup  filter.  As a result, when we jump to  a help tag, the
+# cursor is wrongly positioned 1 line below the tag.
+#}}}
+var job = job_start(':')
 
 def InitHelpTags() #{{{2
     var tagfiles = globpath(&rtp, 'doc/tags', true, true)
@@ -453,41 +507,6 @@ def InitRecentFiles() #{{{2
         ->map({_, v -> #{text: fnamemodify(v, ':~:.'), trailing: '', location: ''}})
 enddef
 
-def SetFilteredSource() #{{{2
-    filtered_source = source
-        ->copy()
-        ->filter({_, v -> v.text =~ filter_text})
-    # FIXME:{{{
-    #
-    #    - `:cd ~`
-    #    - press `SPC ff` to fuzzy find files; it's too slow, so you smash `C-c`
-    #    - `:cd /etc`
-    #    - re-press `SPC ff`
-    #    - Vim keeps looking into `~`
-    #
-    # This try conditional fixes the issue, and it suppresses errors.
-    # But:
-    #
-    #    - sometimes, we have a spurious empty line when re-pressing `SPC ff` to fuzzy find files in `/etc`
-    #    - we need to press `C-c` a few times
-    #    - Vim keeps churning after we press `C-c`; we need to wait a few seconds
-    #    - Vim keeps echoing `Files: ` for a few seconds
-    #
-    # Update: Actually, the fix doesn't always work...
-    #
-    # Idea:  Check which functions are still invoked after we press `C-c`.
-    # Log their activity with `writefile()` and `reltime()` or `localtime()`.
-    # Once you find which  functions are still invoked, try to  write a guard at
-    # the top of their bodies which inspect the state of the job.  If the job is
-    # dead, make the guard bail out.
-    #}}}
-    try
-        UpdatePopups()
-    catch
-        Clean(true)
-    endtry
-enddef
-
 def SetIntermediateSource(_c: channel, data: string) #{{{2
     var _data: string
     if incomplete != ''
@@ -518,10 +537,7 @@ def SetIntermediateSource(_c: channel, data: string) #{{{2
             ->map({_, v -> #{text: v[0], trailing: v[1], location: ''}})
     endif
 
-    # Need to be  set now, in case  we don't write any filtering  text, and just
-    # press Enter  on whatever entry is  the first; otherwise, the exit callback
-    # won't work as expected (e.g. for help tags, we won't jump to the right tag).
-    SetFilteredSource()
+    UpdatePopups()
 enddef
 var incomplete = ''
 
@@ -550,7 +566,8 @@ def SetFinalSource(...l: any) #{{{2
         #                        the last line of the shell ouput ends
         #                        with an undesirable trailing newline
     endif
-    SetFilteredSource()
+
+    UpdatePopups()
 enddef
 
 def FilterLines(id: number, key: string): bool #{{{2
@@ -725,12 +742,14 @@ def UpdateMainTitle() #{{{2
         # `12/34` with `0/0`; this way, we can  be sure that any space used as a
         # padding is preserved.
         #}}}
-        var newtitle = popup_getoptions(menu_winid).title
+        var newtitle = popup_getoptions(menu_winid)
+            ->get('title', '')
             ->substitute('\d\+/\d\+', '0/0', '')
         popup_setoptions(menu_winid, #{title: newtitle})
         return
     endif
-    var newtitle = popup_getoptions(menu_winid).title
+    var newtitle = popup_getoptions(menu_winid)
+        ->get('title', '')
         ->substitute('\d\+', line('.', menu_winid), '')
         ->substitute('/\zs\d\+', line('$', menu_winid), '')
         ->substitute('(\zs\d\+\ze)', len(source), '')
@@ -767,10 +786,14 @@ def UpdatePreview(timerid = 0) #{{{2
     elseif sourcetype == 'Files' || sourcetype == 'RecentFiles'
         filename = ExpandTilde(left)->fnamemodify(':p')
     elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
-        [filename, lnum] = filtered_source
+        var matchlist = filtered_source
             ->get(line('.', menu_winid) - 1, {})
             ->get('location', '')
-            ->matchlist('Last set from \(.*\) line \(\d\+\)$')[1:2]
+            ->matchlist('Last set from \(.*\) line \(\d\+\)$')
+        if len(matchlist) < 3
+            return
+        endif
+        [filename, lnum] = matchlist[1:2]
         filename = ExpandTilde(filename)
     endif
     if !filereadable(filename)
@@ -830,13 +853,18 @@ enddef
 
 
 def ExitCallback(type: string, id: number, result: number) #{{{2
-    Clean()
     if result <= 0
+        # If a job  has been started, and  we want to kill it  by pressing `C-c`
+        # because  it takes  too much  time, `job_stop()`  must be  invoked here
+        # (which `Clean()` does).
+        Clean()
         return
     endif
 
     try
-        var chosen = filtered_source[result - 1].text
+        var chosen = (filtered_source ?? source)
+            ->get(result - 1, {})
+            ->get('text', '')
             ->split('\t')
             ->get(0, '')
             ->trim()
@@ -863,17 +891,9 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
         echohl ErrorMsg
         echom v:exception
         echohl NONE
+    finally
+        Clean()
     endtry
-    # TODO: Could `source` increase Vim's memory footprint?  Should we unlet it now?{{{
-    #
-    # But even  if we want  to, we can't unlet  a script-local variable  in Vim9
-    # script.  This begs another question; in  Vim9 script, is there a risk that
-    # Vim's memory consumption increases when  we use a script-local variable as
-    # a cache.
-    #
-    # Idea: Move `source` into a dictionary.
-    # When you don't need it anymore, remove the key from the dictionary.
-    #}}}
 enddef
 #}}}1
 # Utility {{{1
@@ -954,16 +974,10 @@ def Uniq(list: list<string>): list<string> #{{{2
 enddef
 
 def Clean(closemenu = false) #{{{2
-    # If we don't clear  the source now, next time we start  a fuzzy command, it
-    # will keep looking in the same source, which might not be relevant anymore.
-    source = []
-    incomplete = ''
-
-    # Similarly, we need to  reset `filter_text` so that the next  time we run a
-    # fuzzy  command, we  don't start  re-using the  same typed  text as  before
-    # (which could  be completely irrelevant,  especially if we use  a different
-    # command).
-    filter_text = ''
+    # the job  makes certain assumptions  (like the existence of  popups); let's
+    # stop it  first, to avoid  any issue if we  break one of  these assumptions
+    # later
+    job_stop(job)
 
     popup_close(preview_winid)
     if closemenu
@@ -972,6 +986,8 @@ def Clean(closemenu = false) #{{{2
 
     # clear the message displayed at the command-line
     echo ''
+    # since this might break some assumptions in our code, let's keep it at the end
+    Reset()
 enddef
 
 def GetFindCmd(): string #{{{2
@@ -1052,5 +1068,12 @@ def ExpandTilde(path: string): string #{{{2
     # error should be raised.
     #}}}
     return substitute(path, '^\~/', $HOME .. '/', '')
+enddef
+
+def Reset() #{{{2
+    source = []
+    filtered_source = []
+    filter_text = ''
+    incomplete = ''
 enddef
 
