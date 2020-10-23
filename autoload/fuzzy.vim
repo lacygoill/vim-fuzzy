@@ -60,6 +60,8 @@ vim9script
 #                      ^
 #                      Vim's cwd
 
+# TODO: Implement `:FuzzyLocate`.
+
 # TODO: Implement `:FuzzyBuffer`.
 # https://vi.stackexchange.com/questions/308/regex-that-prefers-shorter-matches-within-a-match-this-is-more-involved-than-n
 # And maybe  `:FuzzyBuffers` (note the final  "s") to find some  needle in *all*
@@ -105,6 +107,7 @@ const BORDERS = 4
 var filter_text = ''
 var preview_winid = 0
 var menu_winid = 0
+var menu_buf = 0
 
 var source: list<dict<string>>
 var filtered_source: list<dict<string>>
@@ -141,6 +144,30 @@ def fuzzy#main(type: string) #{{{2
         return
     endif
 
+    # Without this reset, we might wrongly re-use a stale source.{{{
+    #
+    #     $ cd && vim
+    #     " press:  SPC ff C-c
+    #     :cd /etc
+    #     " press:  SPC ff
+    #     " expected: the files of `/etc` are listed
+    #     " actual: some of the files of the home directory are listed
+    #}}}
+    #   But we already invoke `Reset()` from `Clean()`, isn't that enough?{{{
+    #
+    # It's true  that we invoke  `Clean()` from `ExitCallback()`;  and `Clean()`
+    # does indeed invoke `Reset()`.
+    # However, when you  press exit the main popup before  the job has finished,
+    # some of its callbacks can still be invoked and set `source`.
+    #}}}
+    # Make sure to reset as early as possible.{{{
+    #
+    # We need to reset other variables.
+    # But  we don't  want to  accidentally reset  a variable  after it  has been
+    # correctly initialized.
+    #}}}
+    Reset()
+
     var width = min([TEXTWIDTH, &columns - BORDERS])
     var line = &lines - &ch - statusline - height - 1
 
@@ -172,8 +199,9 @@ def fuzzy#main(type: string) #{{{2
 
     # create popup menu
     menu_winid = popup_menu('', opts)
-    prop_type_add('fuzzyMatch', #{bufnr: winbufnr(menu_winid), highlight: 'Title'})
-    prop_type_add('fuzzyTrailing', #{bufnr: winbufnr(menu_winid), highlight: 'Comment'})
+    menu_buf = winbufnr(menu_winid)
+    prop_type_add('fuzzyMatch', #{bufnr: menu_buf, highlight: 'Title'})
+    prop_type_add('fuzzyTrailing', #{bufnr: menu_buf, highlight: 'Comment'})
 
     # create preview
     opts = popup_getoptions(menu_winid)
@@ -189,24 +217,6 @@ enddef
 #}}}1
 # Core {{{1
 def InitSource() #{{{2
-    # Without this reset, we might wrongly re-use a stale source.{{{
-    #
-    #     $ cd && vim
-    #     " press:  SPC ff C-c
-    #     :cd /etc
-    #     " press:  SPC ff
-    #     " expected: the files of `/etc` are listed
-    #     " actual: some of the files of the home directory are listed
-    #}}}
-    #   But we already invoke `Reset()` from `Clean()`, isn't that enough?{{{
-    #
-    # It's true  that we invoke  `Clean()` from `ExitCallback()`;  and `Clean()`
-    # does indeed invoke `Reset()`.
-    # However, when you  press exit the main popup before  the job has finished,
-    # some of its callbacks can still be invoked and set `source`.
-    #}}}
-    Reset()
-
     if sourcetype == 'Commands' || sourcetype =~ '^Mappings'
         InitCommandsOrMappings()
     elseif sourcetype == 'Files'
@@ -303,75 +313,54 @@ def InitCommandsOrMappings() #{{{2
 enddef
 
 def InitFiles() #{{{2
-    # TODO: It's slow when there are a lot of files.{{{
+    # TODO: Our code is still a bit too slow for an interactive usage.{{{
     #
-    # What could we do to alleviate this issue?
-    # Keep a cache?
-    # Use a faster tool than `find(1)`?
-    # Prune more?
+    # Take inspiration from the `fileselect` plugin.
     #
-    # But, what is slow exactly?
-    # I mean, `find(1)` can be slow, but  even after it's finished, when we type
-    # characters, Vim keeps being slow.   Why?  Is `matchfuzzypos()` slow on big
-    # lists of lines?
+    # The rest of the  comment is stale, but some of its  idea(s) might still be
+    # useful in the future.
     #
-    # Update: Yes, `matchfuzzypos()` is slow when there are a lot of lines.
-    # For example, if there are more than 300000 lines, then it might take 1s.
-    # Then, there is the highlighting:
+    #     It doesn't use a  job to get the list of files.   It runs `readdirex()` on
+    #     the cwd and each of its subdirectories.   But that might take a long time.
+    #     So, it uses 2  loops: a `while` loop, and a `for`  loop.  The `while` loop
+    #     makes sure that the function  calling `readdirex()` doesn't block Vim more
+    #     than 0.1s  (presumably because it  would be noticeable  by the user  if it
+    #     went beyond).  The `for` loop iterates over the entries of a directory.
     #
-    #     highlighted_lines = filtered_source
-    #         ->map({i, v -> #{
-    #             text: v.text .. "\t" .. v.trailing,
-    #             props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyMatch'}})
-    #                 + [#{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
-    #             location: v.location,
-    #             }})
+    #     We could do sth similar.
+    #     We could cut  the source into smaller chunks (50000  entries?), and invoke
+    #     `UpdateMainText()` on  each chunk.  Between  each chunk, we would  let Vim
+    #     "breathe" during half  a second.  After that half a  second, a timer would
+    #     reinvoke `UpdateMainText()` for the next  chunk.  The process would repeat
+    #     itself until there are no more chunks.
     #
-    # This might add 1 or 2 extra seconds for 300000 lines.
+    #     Update: The waiting time could be rather short (`.1s`?), and each time the
+    #     callback is  invoked it  would check whether  we've typed  something (i.e.
+    #     whether `filter_text` has changed).  If so, it would bail out, and restart
+    #     a new  timer.  The callback  would run its code  only if nothing  has been
+    #     typed.
     #
-    # ---
-    #
-    # How does `fileselect` alleviate this issue?
-    #
-    # Answer: It doesn't.  However,  it uses another very  interesting method to
-    # work around  a similar issue.  `fileselect` doesn't use  a job to  get the
-    # list  of  files.   It runs  `readdirex()`  on  the  cwd  and each  of  its
-    # subdirectories.  But that might take a long  time.  So, it uses 2 loops: a
-    # `while`  loop,  and a  `for`  loop.   The  `while`  loop makes  sure  that
-    # the  function  calling `readdirex()`  doesn't  block  Vim more  than  0.1s
-    # (presumably because it would be noticeable by the user if it went beyond).
-    # The `for` loop iterates over the entries of a directory.
-    #
-    # We could do sth similar.
-    # We could cut  the source into smaller chunks (50000  entries?), and invoke
-    # `UpdateMainText()` on  each chunk.  Between  each chunk, we would  let Vim
-    # "breathe" during half  a second.  After that half a  second, a timer would
-    # reinvoke `UpdateMainText()` for the next  chunk.  The process would repeat
-    # itself until there are no more chunks.
-    #
-    # Update: The waiting time could be rather short (`.1s`?), and each time the
-    # callback is  invoked it  would check whether  we've typed  something (i.e.
-    # whether `filter_text` has changed).  If so, it would bail out, and restart
-    # a new  timer.  The callback  would run its code  only if nothing  has been
-    # typed.
-    #
-    # ---
-    #
-    # I  suspect  the  current  implementation is  inefficient,  and  that  some
-    # entries  are   uselessly  filtered  several  times.    For  example,  when
-    # `SetIntermediateSource()`  is invoked  the second  time, and  appends some
-    # lines in `source`, it invokes:
-    #
-    #    1. UpdatePopups()
-    #    2. UpdateMainText()
-    #    3. matchfuzzypos()
-    #
-    # I suspect that `matchfuzzypos()` re-filters the same lines that it already
-    # filtered when `SetIntermediateSource()` invoked it the first time.
-    # I mean, some  of the lines are  new (so filtering them  is necessary), but
-    # the start of the source is the same (so filtering it again is useless).
+    #     Update: I  think you'll  need 2  new variables.   One which  remembers the
+    #     number of  lines you've already  filtered so far.   The other should  be a
+    #     flag telling us whether the filter text has changed since the last time we
+    #     filtered a chunk of the source.
     #}}}
     var findcmd = GetFindCmd()
+    # How slow is `find(1)`?{{{
+    #
+    # As  an example,  currently, `find(1)`  finds  around 300K  entries in  our
+    # `$HOME`.  It needs around 5s:
+    #
+    #     $ find ... | wc -l
+    #
+    # Note  that –  when testing  –  it's important  to redirect  the output  of
+    # `find(1)` to something  else than the terminal; hence the  pipe to `wc -l`
+    # in the previous command.
+    # The terminal  would add some overhead  to regularly update the  screen and
+    # show `find(1)`'s  output.  Besides,  most (all?)  terminals can't  keep up
+    # with a command which has a fast output;  i.e. they need to drop *a lot* of
+    # lines when displaying the output.
+    #}}}
     myjob = job_start(['/bin/sh', '-c', findcmd], #{
         out_cb: SetIntermediateSource,
         exit_cb: SetFinalSource,
@@ -490,6 +479,7 @@ def InitRecentFiles() #{{{2
 enddef
 
 def SetIntermediateSource(_c: channel, data: string) #{{{2
+    job_is_running = true
     var _data: string
     if incomplete != ''
         _data = incomplete .. data
@@ -521,7 +511,9 @@ def SetIntermediateSource(_c: channel, data: string) #{{{2
 
     UpdatePopups()
 enddef
+
 var incomplete = ''
+var job_is_running = false
 
 def SetFinalSource(...l: any) #{{{2
     # Wait for all callbacks to have been processed.{{{
@@ -550,6 +542,7 @@ def SetFinalSource(...l: any) #{{{2
     endif
 
     UpdatePopups()
+    job_is_running = false
 enddef
 
 def FilterLines(id: number, key: string): bool #{{{2
@@ -578,6 +571,8 @@ def FilterLines(id: number, key: string): bool #{{{2
 
     # select a neighboring line
     elseif index(["\<down>", "\<up>", "\<c-n>", "\<c-p>"], key) >= 0
+        var curline = line('.', id)
+        var lastline = line('$', id)
         # No need to update the popup if we try to move beyond the first/last line.{{{
         #
         # Besides, if  you let Vim  update the popup  in those cases,  it causes
@@ -585,10 +580,8 @@ def FilterLines(id: number, key: string): bool #{{{2
         # `C-n` or `C-p` for a bit too long.  Note that `id` (function argument)
         # and `menu_winid` (script local) have the same value.
         #}}}
-        if key == "\<up>" && line('.', id) == 1
-        || key == "\<c-p>" && line('.', id) == 1
-        || key == "\<down>" && line('.', id) == line('$', id)
-        || key == "\<c-n>" && line('.', id) == line('$', id)
+        if index(["\<up>", "\<c-p>"], key) >= 0 && curline == 1
+        || index(["\<down>", "\<c-n>"], key) >= 0 && curline == lastline
             return true
         endif
         var cmd = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
@@ -632,10 +625,25 @@ def UpdatePopups(notTheMainText = false) #{{{2
     endif
     preview_timer = timer_start(50, UpdatePreview)
 enddef
+
 var preview_timer = 0
 
 def UpdateMainText() #{{{2
 # update the popup with the new list of lines
+
+    var to_filter: list<dict<string>>
+    if job_is_running
+        if filter_text != last_filter_text
+            last_filtered_line = 0
+            popup_settext(menu_winid, '')
+            last_filter_text = filter_text
+        endif
+        to_filter = source[last_filtered_line : ]
+        last_filtered_line = len(source)
+    else
+        to_filter = source
+    endif
+
     var highlighted_lines: list<dict<any>>
     if filter_text =~ '\S'
         var matchfuzzypos: list<any>
@@ -674,8 +682,7 @@ def UpdateMainText() #{{{2
         endif
         matchfuzzypos = tokens
             ->Permutations()
-            ->map({_, v -> join(v, '')})
-            ->map({_, v -> matchfuzzypos(source, v, #{key: 'text'})})
+            ->map({_, v -> matchfuzzypos(to_filter, join(v, ''), #{key: 'text'})})
             ->reduce({a, v -> [a[0] + v[0], a[1] + v[1]]})
 
         var pos: list<list<number>>
@@ -695,7 +702,7 @@ def UpdateMainText() #{{{2
                 location: v.location,
                 }})
     else
-        highlighted_lines = source
+        highlighted_lines = to_filter
             ->copy()
             ->map({_, v -> #{
                 text: v.text .. "\t" .. v.trailing,
@@ -703,7 +710,33 @@ def UpdateMainText() #{{{2
                 location: v.location,
                 }})
     endif
-    popup_settext(menu_winid, highlighted_lines)
+
+    # `!job_is_running` for when we type some characters to filter the menu.
+    # TODO:  I'm not convinced `!job_is_running`  is always correct.  What if:{{{
+    #
+    #    - we have a huge source obtained synchronously
+    #    - we refactor the code to split the source into smaller chunks
+    #    - we invoke the current function several times on each chunk
+    #
+    # We will then  need to *append*  lines; not reset the whole buffer.
+    # I think you'll need to write sth like this:
+    #
+    #     if !Menu_is_empty() && (job_is_running || processing_big_source)
+    #         Popup_appendtext(highlighted_lines)
+    #     else
+    #         popup_settext(menu_winid, highlighted_lines)
+    #     endif
+    #
+    # `processing_big_source` is  a boolean flag  which should be on  when we're
+    # processing a big source.
+    #
+    # Update: I'm still not sure this pseudo-code is correct.
+    #}}}
+    if Menu_is_empty() || !job_is_running
+        popup_settext(menu_winid, highlighted_lines)
+    else
+        Popup_appendtext(highlighted_lines)
+    endif
     # select first entry after every change of the filtering text (to mimic what fzf does)
     win_execute(menu_winid, 'norm! 1G')
 
@@ -714,9 +747,12 @@ def UpdateMainText() #{{{2
     echohl NONE
 enddef
 
+var last_filtered_line: number
+var last_filter_text: string
+
 def UpdateMainTitle() #{{{2
     # Special case:  no line matches what we've typed so far.
-    if line('$', menu_winid) == 1 && winbufnr(menu_winid)->getbufline(1) == ['']
+    if line('$', menu_winid) == 1 && getbufline(menu_buf, 1) == ['']
         # Warning: It's important that even if no line matches, the title still respects the format `12/34 (56)`.{{{
         #
         # Otherwise, after pressing `C-u`, the title will still not respect the format.
@@ -739,8 +775,15 @@ def UpdateMainTitle() #{{{2
 enddef
 
 def UpdatePreview(timerid = 0) #{{{2
-    var splitted = winbufnr(menu_winid)
-        ->getbufline(line('.', menu_winid))
+    var line = getbufline(menu_buf, line('.', menu_winid))
+
+    # clear the preview if nothing matches the filtering pattern
+    if line == ['']
+        popup_settext(preview_winid, '')
+        return
+    endif
+
+    var splitted = line
         ->get(0, '')
         ->split('\t\+')
     var left = ''
@@ -833,7 +876,6 @@ def UpdatePreview(timerid = 0) #{{{2
     endif
 enddef
 
-
 def ExitCallback(type: string, id: number, result: number) #{{{2
     if result <= 0
         # If a job  has been started, and  we want to kill it  by pressing `C-c`
@@ -854,6 +896,34 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
             return
         endif
 
+        # The cursor is wrongly moved 1 line down when I press Enter!{{{
+        #
+        # Maybe an error  is raised somewhere (not necessarily  from the current
+        # function; it could be due to a triggered autocmd defined elsewhere).
+        # And if an error is raised, `Enter` is not discarded.
+        # From `:h popup-filter-errors`:
+        #
+        #    > If the filter causes an error then it is assumed to return zero.
+        #
+        # See also:
+        # https://github.com/vim/vim/issues/7156#issuecomment-713527749
+        #
+        # One solution  is to make sure  that the error is  either suppressed by
+        # `:silent!` or caught by a try conditional.
+        # Unfortunately, this only works in Vim script legacy, not in Vim9.
+        # So, if:
+        #
+        #    - the current function fires an event
+        #    - the event triggers an autocmd
+        #    - the autocmd calls a legacy function
+        #    - the legacy function executes a command which raises an error
+        #
+        # `Enter` won't be discarded; even if the error is suppressed or caught.
+        # But I *think* it will be fixed in the future.
+        #
+        # See also:
+        # https://github.com/vim/vim/issues/7178#issuecomment-714442958
+        #}}}
         if type == 'Files' || type == 'RecentFiles'
             exe 'sp ' .. chosen->fnameescape()
 
@@ -960,11 +1030,46 @@ def Uniq(list: list<string>): list<string> #{{{2
     return ret
 enddef
 
+def Popup_appendtext(text: list<dict<any>>) #{{{2
+    var lastlnum = line('$', menu_winid)
+
+    # append text
+    eval text
+        ->copy()
+        ->map({_, v -> v.text})
+        ->appendbufline(menu_buf, '$')
+
+    # apply text properties
+    # Can't use a nested `map()` because nested closures don't always work.{{{
+    #
+    #     eval text
+    #         ->map({i, v -> v.props->map({_, w -> call('prop_add',
+    #             [lastlnum + i + 1, w.col] + [extend(w, #{bufnr: menu_buf})])})})
+    #
+    # Here, `lastlnum` would always be – wrongly – evaluated to `1`.
+    #
+    # This is a known limitation: https://github.com/vim/vim/issues/7150
+    # It could be fixed one day, but I still prefer a `for` loop:
+    #
+    #    - it makes the code a little more readable
+    #    - it might be faster
+    #}}}
+    var i = 0
+    for d in text
+        eval d.props
+            ->map({_, v -> call('prop_add',
+                [lastlnum + i + 1, v.col] + [extend(v, #{bufnr: menu_buf})])})
+        i += 1
+    endfor
+enddef
+
 def Clean(closemenu = false) #{{{2
     # the job  makes certain assumptions  (like the existence of  popups); let's
     # stop it  first, to avoid  any issue if we  break one of  these assumptions
     # later
+    var job_was_running = false
     if job_status(myjob) == 'run'
+        job_was_running = true
         job_stop(myjob)
     endif
 
@@ -975,6 +1080,26 @@ def Clean(closemenu = false) #{{{2
 
     # clear the message displayed at the command-line
     echo ''
+    # TODO: We need this in case we exit the popup while a job is still running.{{{
+    #
+    # Otherwise, some job's callbacks might still  be invoked even after the job
+    # has been stopped.  They might call:
+    #
+    #     UpdatePopups() → UpdateMainText() → Popup_appendtext()
+    #
+    # The latter function assumes that `menu_buf` refers to an existing buffer.
+    #
+    # However, all  of this looks  ugly; the  job's callbacks should  not invoke
+    # `UpdatePopups()`.  At least, they should not do it unconditionally.
+    # We'll refactor how the popup is updated in the future.
+    # When you're done  with this refactoring, check whether we  still need this
+    # `sleep` and this `job_was_running`.
+    # To do a test, enter a directory  with a lot of files (e.g. `$HOME`), press
+    # `SPC ff`, then `ESC`.
+    #}}}
+    if job_was_running
+        sleep 1m
+    endif
     # since this might break some assumptions in our code, let's keep it at the end
     Reset()
 enddef
@@ -1060,9 +1185,17 @@ def ExpandTilde(path: string): string #{{{2
 enddef
 
 def Reset() #{{{2
+    menu_buf = 0
     source = []
     filtered_source = []
     filter_text = ''
     incomplete = ''
+    job_is_running = false
+    last_filtered_line = 0
+    last_filter_text = ''
+enddef
+
+def Menu_is_empty(): bool #{{{2
+    return line('$', menu_winid) == 1 && getbufline(menu_buf, 1) == ['']
 enddef
 
