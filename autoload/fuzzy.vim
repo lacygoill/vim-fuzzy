@@ -646,45 +646,7 @@ def UpdateMainText() #{{{2
 
     var highlighted_lines: list<dict<any>>
     if filter_text =~ '\S'
-        var matchfuzzypos: list<any>
-        # Problem: We can't pass the typed text to `matchfuzzypos()` directly.{{{
-        #
-        # If we type a whitespace-separated list of token, we want to:
-        #
-        #    - ignore the whitespace
-        #    - look for the tokens in all possible orders
-        #
-        # `matchfuzzypos()` will not look for the tokens in all possible orders,
-        # and won't even ignore whitespace.
-        #}}}
-        # Solution:{{{
-        #
-        # Split the  string on every  whitespace, compute all  permutations, run
-        # `matchfuzzypos()` on each permutation, and join the results.
-        #}}}
-        var tokens = split(filter_text)
-        # Problem: `matchfuzzypos()` gets too slow as the number of tokens increases.{{{
-        #
-        # 4 tokens = 24 permutations = 24 invocations of `matchfuzzypos()`.
-        #}}}
-        # Solution: Limit the splitting to 3 tokens max.{{{
-        #
-        # Note   that   this   already   generates   6   permutations,   causing
-        # `matchfuzzypos()` to be  invoked 6 times, which  is already noticeable
-        # (i.e. a keypress slightly lags when you have 3 tokens).
-        #}}}
-        # TODO: This might be too slow when there are a lot of lines.
-        # You might want  to replace `4` with a number  which takes into account
-        # the type of source, or better yet, the number of lines.
-        if len(tokens) >= 4
-            var rest = tokens[2:]->join()->substitute('\s\+', '', 'g')
-            tokens = [tokens[0], tokens[1], rest]
-        endif
-        matchfuzzypos = tokens
-            ->Permutations()
-            ->map({_, v -> matchfuzzypos(to_filter, join(v, ''), #{key: 'text'})})
-            ->reduce({a, v -> [a[0] + v[0], a[1] + v[1]]})
-
+        var matchfuzzypos = matchfuzzypos(to_filter, filter_text, #{key: 'text'})
         var pos: list<list<number>>
         # Why using `filtered_source` to save `matchfuzzypos()`?{{{
         #
@@ -973,31 +935,6 @@ def Error(msg: string) #{{{2
     echohl ErrorMsg
     echom msg
     echohl None
-enddef
-
-def Permutations(l: list<string>): list<list<string>> #{{{2
-# https://stackoverflow.com/a/17391851/9780968
-    if len(l) == 0
-        return [[]]
-    endif
-    var ret = []
-    # iterate over the permutations of the sublist which excludes the first item
-    for sublistPermutation in Permutations(l[1:])
-    # iterate over the permutations of the original list
-        for permutation in InsertItemAtAllPositions(l[0], sublistPermutation)
-            ret += [permutation]
-        endfor
-    endfor
-    return ret
-enddef
-
-def InsertItemAtAllPositions(item: string, l: list<string>): list<list<string>>
-    var ret = []
-    # iterate over all the positions at which we can insert the item in the list
-    for i in range(len(l) + 1)
-        ret += [ (i == 0 ? [] : l[0 : i - 1]) + [item] + l[i : ] ]
-    endfor
-    return ret
 enddef
 
 def BuflistedSorted(): list<string> #{{{2
