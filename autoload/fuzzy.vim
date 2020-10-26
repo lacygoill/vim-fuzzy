@@ -694,13 +694,6 @@ def UpdateMainText() #{{{2
     var filter_text_has_changed = filter_text != last_filter_text
     last_filter_text = filter_text
     if filter_text_has_changed
-        # FIXME:  If we type some filtering pattern which doesn't match anything{{{
-        # while a  job is  running (e.g. `abcdefghijkl`  in `$HOME`),  the total
-        # (printed inside parens) is wrong (no longer updated).
-        #
-        # If we comment out the current `if` block, the issue is partially fixed.
-        # The total is updated again, but the popup is not emptied anymore.
-        #}}}
         filtered_source = []
         last_filtered_line = -1
         popup_settext(menu_winid, '')
@@ -821,7 +814,19 @@ def UpdateMainTitle() #{{{2
         #}}}
         var newtitle = popup_getoptions(menu_winid)
             ->get('title', '')
-            ->substitute('\d\+/\d\+', '0/0', '')
+            # Why do you replace the total?  It seems useless.{{{
+            #
+            # It's only useless when the source has been fully computed.
+            #
+            # Suppose we type  some filtering text which  doesn't match anything
+            # while the source is still being  computed.  If we just replace the
+            # first 2 numbers:
+            #
+            #     ->substitute('\d\+/\d\+', '0/0', '')
+            #
+            # Then, the total won't be updated in the title.
+            #}}}
+            ->substitute('\d\+/\d\+ ([,0-9]\+)', len(source)->printf('0/0 (%d)'), '')
         popup_setoptions(menu_winid, #{title: newtitle})
         return
     endif
