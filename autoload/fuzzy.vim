@@ -18,7 +18,7 @@ vim9script
 #      typed so far in the extra popup, but only when it has changed (i.e. it would
 #      ignore motions)
 #
-# Maybe the extra  popup leverage the concept of  prompt buffer...
+# Maybe the extra popup could leverage the concept of prompt buffer.
 #
 # Suggestion2: There has been some discussion on Google regarding a feature
 # request originally posted on github:
@@ -60,16 +60,23 @@ vim9script
 #                      ^
 #                      Vim's cwd
 
-# TODO: Implement `:FuzzyLocate`.
-
 # TODO: Implement `:FuzzyBuffer`.
 # https://vi.stackexchange.com/questions/308/regex-that-prefers-shorter-matches-within-a-match-this-is-more-involved-than-n
 # And maybe  `:FuzzyBuffers` (note the final  "s") to find some  needle in *all*
 # the buffers.
 #
 # What about `:FzBuffers` which look for all opened buffers?
+#
+# ---
+#
+# This  is an  example of  source  which can  be  huge, but  cannot be  obtained
+# asynchronously.  This is an issue, because it can block Vim for a long time.
+# Check out how vim-fileselect tackle this issue.
 
 # TODO: Implement `:FuzzySnippets`.
+
+# TODO: Integrate `unichar#complete#fuzzy()` here.
+# Or provide a public function (similar to `fzf#run()`)?
 
 # TODO: Get rid of the Vim plugins fzf and fzf.vim.{{{
 #
@@ -104,17 +111,62 @@ const TEXTWIDTH = 80
 # 2 popups = 4 borders
 const BORDERS = 4
 
-var filter_text = ''
-var preview_winid = 0
-var menu_winid = 0
-var menu_buf = 0
+# Maximum number of lines we're ok for `matchfuzzypos()` to process.{{{
+#
+# We don't want `matchfuzzypos()` to process  too many lines at once, because it
+# might be  slow and block Vim,  while we want  to add some character(s)  to the
+# filter text.
+#
+# Note that `matchfuzzypos()` is followed  by a `map()` invocation whose purpose
+# is to add some  highlighting.  Same issue: it might be too  slow if the source
+# is huge.
+#
+# If  the source  is bigger  than this  constant, our  code will  split it  into
+# smaller chunks, which will be processed one after the other, via timers.
+# These  timers   will  let  us  type   text  if  needed  while   the  soure  is
+# being  processed;  in  effect,  this  should give  us  the  *impression*  that
+# `matchfuzzypos()` is run asynchronously.
+#}}}
+const SOURCECHUNKSIZE = 10000
 
-var source: list<dict<string>>
+const UPDATEPREVIEW_WAITINGTIME = 50
+
+var filter_text = ''
+var menu_buf = -1
+var menu_winid = -1
+var preview_winid = -1
+
 var filtered_source: list<dict<string>>
+var source: list<dict<string>>
 var sourcetype: string
+var source_is_being_computed = false
 
 # Interface {{{1
 def fuzzy#main(type: string) #{{{2
+    # Without this reset, we might wrongly re-use a stale source.{{{
+    #
+    #     $ cd && vim
+    #     " press:  SPC ff C-c
+    #     :cd /etc
+    #     " press:  SPC ff
+    #     " expected: the files of `/etc` are listed
+    #     " actual: some of the files of the home directory are listed
+    #}}}
+    #   But we already invoke `Reset()` from `Clean()`, isn't that enough?{{{
+    #
+    # It's true  that we invoke  `Clean()` from `ExitCallback()`;  and `Clean()`
+    # does indeed invoke `Reset()`.
+    # However, when you  press exit the main popup before  the job has finished,
+    # some of its callbacks can still be invoked and set `source`.
+    #}}}
+    # Make sure to reset as early as possible.{{{
+    #
+    # We need to reset other variables.
+    # But  we don't  want to  accidentally reset  a variable  after it  has been
+    # correctly initialized.
+    #}}}
+    Reset()
+
     sourcetype = type
 
     if UtilityIsMissing()
@@ -143,30 +195,6 @@ def fuzzy#main(type: string) #{{{2
         echohl NONE
         return
     endif
-
-    # Without this reset, we might wrongly re-use a stale source.{{{
-    #
-    #     $ cd && vim
-    #     " press:  SPC ff C-c
-    #     :cd /etc
-    #     " press:  SPC ff
-    #     " expected: the files of `/etc` are listed
-    #     " actual: some of the files of the home directory are listed
-    #}}}
-    #   But we already invoke `Reset()` from `Clean()`, isn't that enough?{{{
-    #
-    # It's true  that we invoke  `Clean()` from `ExitCallback()`;  and `Clean()`
-    # does indeed invoke `Reset()`.
-    # However, when you  press exit the main popup before  the job has finished,
-    # some of its callbacks can still be invoked and set `source`.
-    #}}}
-    # Make sure to reset as early as possible.{{{
-    #
-    # We need to reset other variables.
-    # But  we don't  want to  accidentally reset  a variable  after it  has been
-    # correctly initialized.
-    #}}}
-    Reset()
 
     var width = min([TEXTWIDTH, &columns - BORDERS])
     var line = &lines - &ch - statusline - height - 1
@@ -227,7 +255,7 @@ def InitSource() #{{{2
         InitRecentFiles()
     endif
 
-    UpdatePopups()
+    MaybeUpdatePopups()
 enddef
 
 def InitCommandsOrMappings() #{{{2
@@ -287,7 +315,7 @@ def InitCommandsOrMappings() #{{{2
             #
             # It was too costly in the past when we used `expand()`.  Now we use
             # `ExpandTilde()`, which relies on  `substitute()` and is faster, so
-            # I don't know whether it would be still too costly...
+            # I don't know whether it would be still too costly.
             #}}}
             location: matchstr(v, 'Last set from .* line \d\+$'),
             }})
@@ -313,38 +341,7 @@ def InitCommandsOrMappings() #{{{2
 enddef
 
 def InitFiles() #{{{2
-    # TODO: Our code is still a bit too slow for an interactive usage.{{{
-    #
-    # Take inspiration from the `fileselect` plugin.
-    #
-    # The rest of the  comment is stale, but some of its  idea(s) might still be
-    # useful in the future.
-    #
-    #     It doesn't use a  job to get the list of files.   It runs `readdirex()` on
-    #     the cwd and each of its subdirectories.   But that might take a long time.
-    #     So, it uses 2  loops: a `while` loop, and a `for`  loop.  The `while` loop
-    #     makes sure that the function  calling `readdirex()` doesn't block Vim more
-    #     than 0.1s  (presumably because it  would be noticeable  by the user  if it
-    #     went beyond).  The `for` loop iterates over the entries of a directory.
-    #
-    #     We could do sth similar.
-    #     We could cut  the source into smaller chunks (50000  entries?), and invoke
-    #     `UpdateMainText()` on  each chunk.  Between  each chunk, we would  let Vim
-    #     "breathe" during half  a second.  After that half a  second, a timer would
-    #     reinvoke `UpdateMainText()` for the next  chunk.  The process would repeat
-    #     itself until there are no more chunks.
-    #
-    #     Update: The waiting time could be rather short (`.1s`?), and each time the
-    #     callback is  invoked it  would check whether  we've typed  something (i.e.
-    #     whether `filter_text` has changed).  If so, it would bail out, and restart
-    #     a new  timer.  The callback  would run its code  only if nothing  has been
-    #     typed.
-    #
-    #     Update: I  think you'll  need 2  new variables.   One which  remembers the
-    #     number of  lines you've already  filtered so far.   The other should  be a
-    #     flag telling us whether the filter text has changed since the last time we
-    #     filtered a chunk of the source.
-    #}}}
+    source_is_being_computed = true
     var findcmd = GetFindCmd()
     # How slow is `find(1)`?{{{
     #
@@ -479,7 +476,6 @@ def InitRecentFiles() #{{{2
 enddef
 
 def SetIntermediateSource(_c: channel, data: string) #{{{2
-    job_is_running = true
     var _data: string
     if incomplete != ''
         _data = incomplete .. data
@@ -501,19 +497,18 @@ def SetIntermediateSource(_c: channel, data: string) #{{{2
     # too many irrelevant results (test with the pattern "changes").
     #}}}
     if sourcetype == 'Files'
-        source += splitted_data
+        eval splitted_data
             ->map({_, v -> #{text: v, trailing: '', location: ''}})
+            ->AppendSource()
     else
-        source += splitted_data
+        eval splitted_data
             ->map({_, v -> split(v, '\t')})
             ->map({_, v -> #{text: v[0], trailing: v[1], location: ''}})
+            ->AppendSource()
     endif
-
-    UpdatePopups()
 enddef
 
 var incomplete = ''
-var job_is_running = false
 
 def SetFinalSource(...l: any) #{{{2
     # Wait for all callbacks to have been processed.{{{
@@ -533,16 +528,20 @@ def SetFinalSource(...l: any) #{{{2
     # the next time we run `:FuzzyHelp`
     incomplete = ''
     if sourcetype == 'Files'
-        source += [#{text: parts->join("\t")->trim("\<c-j>"), trailing: '', location: ''}]
+        [#{text: parts->join("\t")->trim("\<c-j>"), trailing: '', location: ''}]->AppendSource()
     else
-        source += [#{text: parts[0], trailing: parts[1]->trim("\<c-j>"), location: ''}]
-        #                                                     ^------^
-        #                        the last line of the shell ouput ends
-        #                        with an undesirable trailing newline
+        [#{text: parts[0], trailing: parts[1]->trim("\<c-j>"), location: ''}]->AppendSource()
+        #                                           ^------^
+        #              the last line of the shell ouput ends
+        #              with an undesirable trailing newline
     endif
-
+    source_is_being_computed = false
     UpdatePopups()
-    job_is_running = false
+enddef
+
+def AppendSource(l: list<dict<string>>) #{{{2
+    source += l
+    MaybeUpdatePopups()
 enddef
 
 def FilterLines(id: number, key: string): bool #{{{2
@@ -552,7 +551,9 @@ def FilterLines(id: number, key: string): bool #{{{2
     # filter the names based on the typed key and keys typed before
     if key =~ '^\p$'
         filter_text ..= key
-        UpdatePopups()
+        if key !~ '\s'
+            UpdatePopups()
+        endif
         return true
 
     # clear the filter text entirely
@@ -589,6 +590,16 @@ def FilterLines(id: number, key: string): bool #{{{2
         UpdatePopups(true)
         return true
 
+    # select first or last line
+    elseif key == "\<c-g>"
+        if line('.', menu_winid) == 1
+            win_execute(menu_winid, 'norm! G')
+        else
+            win_execute(menu_winid, 'norm! 1G')
+        endif
+        UpdatePopups(true)
+        return true
+
     # allow for the preview to be scrolled
     elseif key == "\<m-j>" || key == "\<f21>"
         win_execute(preview_winid, ['setl cul', 'norm! j'])
@@ -610,6 +621,26 @@ def FilterLines(id: number, key: string): bool #{{{2
     return popup_filter_menu(id, key)
 enddef
 
+def MaybeUpdatePopups() #{{{2
+    var current_source_length = len(source)
+
+    # if enough lines have been accumulated
+    if current_source_length - last_filtered_line >= SOURCECHUNKSIZE
+      # or if there are still some lines to process and the source has not changed since last time
+      || last_filtered_line < current_source_length - 1
+      && last_source_length != current_source_length
+        UpdatePopups()
+    endif
+
+    last_source_length = current_source_length
+enddef
+
+var last_filter_text = ''
+var last_filtered_line = -1
+var last_source_length = -1
+var new_last_filtered_line = -1
+var popups_update_timer = -1
+
 def UpdatePopups(notTheMainText = false) #{{{2
     if !notTheMainText
         UpdateMainText()
@@ -617,46 +648,116 @@ def UpdatePopups(notTheMainText = false) #{{{2
 
     UpdateMainTitle()
 
-    # no need to  update the preview on every keypress,  when we're typing fast;
-    # update only when we've paused for at least 50ms
-    if preview_timer > 0
-        timer_stop(preview_timer)
-        preview_timer = 0
-    endif
-    preview_timer = timer_start(50, UpdatePreview)
+    # No need to update the preview on every keypress, when we're typing fast.
+    # Update only when we've paused for at least 50ms.
+    timer_stop(preview_timer)
+    preview_timer = timer_start(UPDATEPREVIEW_WAITINGTIME, UpdatePreview)
 enddef
 
-var preview_timer = 0
+var preview_timer = -1
 
 def UpdateMainText() #{{{2
 # update the popup with the new list of lines
 
-    var to_filter: list<dict<string>>
-    if job_is_running
-        if filter_text != last_filter_text
-            last_filtered_line = 0
-            popup_settext(menu_winid, '')
-            last_filter_text = filter_text
-        endif
-        to_filter = source[last_filtered_line : ]
-        last_filtered_line = len(source)
-    else
-        to_filter = source
+    # TODO: Why do we need this guard (it looks clumsy)?{{{
+    #
+    # *Sometimes*, after pressing `C-c` while a job is running:
+    #
+    #    - the job keeps running
+    #    - the command-line is not cleared
+    #    - `E964` is raised from `Popup_appendtext()` when we try to apply text properties
+    #
+    # I think that's because we sometimes invoke `UpdatePopups()` with a timer.
+    # It's possible that  we kill the popup, and a  timer's callback still tries
+    # to update it afterward.
+    #
+    # But this begs the question: how is  it possible for the popup to be closed
+    # without the exit callback being invoked?
+    #
+    # Update: I think I can reproduce the issue even without the timer(s).
+    # Find a MWE.
+    #
+    # When you do tests, run this command in a separate tmux pane:
+    #
+    #     $ watch -n 0.1 pidof find
+    #
+    # ---
+    #
+    # Note that the issue can only be reproduced while the source is being computed.
+    # That is, only while a job is running.
+    #}}}
+    if win_gettype(menu_winid) != 'popup'
+        Clean()
+        return
     endif
 
-    var highlighted_lines: list<dict<any>>
-    if filter_text =~ '\S'
-        var matchfuzzypos = matchfuzzypos(to_filter, filter_text, #{key: 'text'})
-        var pos: list<list<number>>
-        # Why using `filtered_source` to save `matchfuzzypos()`?{{{
+    var filter_text_has_changed = filter_text != last_filter_text
+    last_filter_text = filter_text
+    if filter_text_has_changed
+        # FIXME:  If we type some filtering pattern which doesn't match anything{{{
+        # while a  job is  running (e.g. `abcdefghijkl`  in `$HOME`),  the total
+        # (printed inside parens) is wrong (no longer updated).
         #
-        # It needs to be updated now, so that `ExitCallback()` works as expected
-        # later (e.g. to jump to the right help tag).
+        # If we comment out the current `if` block, the issue is partially fixed.
+        # The total is updated again, but the popup is not emptied anymore.
         #}}}
-        [filtered_source, pos] = matchfuzzypos
+        filtered_source = []
+        last_filtered_line = -1
+        popup_settext(menu_winid, '')
+    endif
 
-        # add info to get highlight via text properties
-        highlighted_lines = filtered_source
+    var current_source_length = len(source)
+    new_last_filtered_line = min([
+        last_filtered_line + SOURCECHUNKSIZE,
+        current_source_length - 1
+        ])
+    var lines = source[last_filtered_line + 1 : new_last_filtered_line]
+    var highlighted_lines = GetHighlightedLines(lines)
+    if MenuIsEmpty()
+        popup_settext(menu_winid, highlighted_lines)
+    else
+        Popup_appendtext(highlighted_lines)
+    endif
+    last_filtered_line = new_last_filtered_line
+
+    # if we haven't filtered all lines, start a timer to finish the work later
+    if new_last_filtered_line < current_source_length - 1
+      # if the source is still being computed, the popups will be updated automatically,
+      # the next time the source is updated
+      && !source_is_being_computed
+        timer_stop(popups_update_timer)
+        popups_update_timer = timer_start(0, {-> UpdatePopups()})
+    endif
+
+    # Rationale:{{{
+    #
+    # Suppose we're currently selecting the line `34`.
+    # We type a new character, which filters out some lines; only `12` remain.
+    # We're now automatically selecting line `12`; but the view is wrong; we can
+    # only see line `12`, and not the previous ones.  This is jarring.
+    # Let's  fix that  by automatically  selecting the  first line  whenever the
+    # filter text changes.
+    #
+    # Besides, that's what `fzf(1)` does.
+    #}}}
+    if filter_text_has_changed
+        win_execute(menu_winid, 'norm! 1G')
+    endif
+
+    EchoSourceAndFilterText()
+enddef
+
+def GetHighlightedLines(lines: list<dict<string>>): list<dict<any>> #{{{2
+    # add info to get highlight via text properties
+    if filter_text =~ '\S'
+        var matches: list<dict<string>>
+        var pos: list<list<number>>
+        [matches, pos] = matchfuzzypos(lines, filter_text, #{key: 'text'})
+        # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
+        # works as expected later (i.e. can determine which entry we've chosen).
+        filtered_source += matches
+
+        return matches
             ->map({i, v -> #{
                 text: v.text .. "\t" .. v.trailing,
                 props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyMatch'}})
@@ -664,7 +765,8 @@ def UpdateMainText() #{{{2
                 location: v.location,
                 }})
     else
-        highlighted_lines = to_filter
+        return lines
+            # need a copy to not mutate `source` (or a slice of it)
             ->copy()
             ->map({_, v -> #{
                 text: v.text .. "\t" .. v.trailing,
@@ -672,45 +774,40 @@ def UpdateMainText() #{{{2
                 location: v.location,
                 }})
     endif
-
-    # `!job_is_running` for when we type some characters to filter the menu.
-    # TODO:  I'm not convinced `!job_is_running`  is always correct.  What if:{{{
-    #
-    #    - we have a huge source obtained synchronously
-    #    - we refactor the code to split the source into smaller chunks
-    #    - we invoke the current function several times on each chunk
-    #
-    # We will then  need to *append*  lines; not reset the whole buffer.
-    # I think you'll need to write sth like this:
-    #
-    #     if !Menu_is_empty() && (job_is_running || processing_big_source)
-    #         Popup_appendtext(highlighted_lines)
-    #     else
-    #         popup_settext(menu_winid, highlighted_lines)
-    #     endif
-    #
-    # `processing_big_source` is  a boolean flag  which should be on  when we're
-    # processing a big source.
-    #
-    # Update: I'm still not sure this pseudo-code is correct.
-    #}}}
-    if Menu_is_empty() || !job_is_running
-        popup_settext(menu_winid, highlighted_lines)
-    else
-        Popup_appendtext(highlighted_lines)
-    endif
-    # select first entry after every change of the filtering text (to mimic what fzf does)
-    win_execute(menu_winid, 'norm! 1G')
-
-    echohl ModeMsg
-    echo sourcetype->substitute('\l\zs\ze\u', ' ', 'g') .. ': '
-    echohl Title
-    echon filter_text
-    echohl NONE
 enddef
 
-var last_filtered_line: number
-var last_filter_text: string
+def Popup_appendtext(text: list<dict<any>>) #{{{2
+    var lastlnum = line('$', menu_winid)
+
+    # append text
+    eval text
+        ->copy()
+        ->map({_, v -> v.text})
+        ->appendbufline(menu_buf, '$')
+
+    # apply text properties
+    # Can't use a nested `map()` because nested closures don't always work.{{{
+    #
+    #     eval text
+    #         ->map({i, v -> v.props->map({_, w -> call('prop_add',
+    #             [lastlnum + i + 1, w.col] + [extend(w, #{bufnr: menu_buf})])})})
+    #
+    # Here, `lastlnum` would always be – wrongly – evaluated to `1`.
+    #
+    # This is a known limitation: https://github.com/vim/vim/issues/7150
+    # It could be fixed one day, but I still prefer a `for` loop:
+    #
+    #    - it makes the code a little more readable
+    #    - it might be faster
+    #}}}
+    var i = 0
+    for d in text
+        eval d.props
+            ->map({_, v -> call('prop_add',
+                [lastlnum + i + 1, v.col] + [extend(v, #{bufnr: menu_buf})])})
+        i += 1
+    endfor
+enddef
 
 def UpdateMainTitle() #{{{2
     # Special case:  no line matches what we've typed so far.
@@ -732,7 +829,7 @@ def UpdateMainTitle() #{{{2
         ->get('title', '')
         ->substitute('\d\+', line('.', menu_winid), '')
         ->substitute('/\zs\d\+', line('$', menu_winid), '')
-        ->substitute('(\zs\d\+\ze)', len(source), '')
+        ->substitute('(\zs[,0-9]\+\ze)', len(source)->string()->FormatBigNumber(), '')
     popup_setoptions(menu_winid, #{title: newtitle})
 enddef
 
@@ -914,8 +1011,84 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
         Clean()
     endtry
 enddef
+
+def Clean(closemenu = false) #{{{2
+    # the job  makes certain assumptions  (like the existence of  popups); let's
+    # stop it  first, to avoid  any issue if we  break one of  these assumptions
+    # later
+    var job_was_running = false
+    if job_status(myjob) == 'run'
+        job_was_running = true
+        job_stop(myjob)
+    endif
+
+    timer_stop(popups_update_timer)
+
+    popup_close(preview_winid)
+    if closemenu
+        popup_close(menu_winid)
+    endif
+
+    # TODO: We need this in case we exit the popup while a job is still running.{{{
+    #
+    # Otherwise, some job's callbacks might still  be invoked even after the job
+    # has been stopped.  They might call:
+    #
+    #     UpdatePopups() → UpdateMainText() → Popup_appendtext()
+    #
+    # The latter function assumes that `menu_buf` refers to an existing buffer.
+    #
+    # However, all  of this looks  ugly; the  job's callbacks should  not invoke
+    # `UpdatePopups()`.  At least, they should not do it unconditionally.
+    # We'll refactor how the popup is updated in the future.
+    # When you're done  with this refactoring, check whether we  still need this
+    # `sleep` and this `job_was_running`.
+    # To do a test, enter a directory  with a lot of files (e.g. `$HOME`), press
+    # `SPC ff`, then `ESC`.
+    #}}}
+    if job_was_running
+        sleep 1m
+    endif
+
+    # clear the message displayed at the command-line
+    echo ''
+    # since this might break some assumptions in our code, let's keep it at the end
+    Reset()
+enddef
+
+def Reset() #{{{2
+    filter_text = ''
+    filtered_source = []
+    incomplete = ''
+    last_filter_text = ''
+    last_filtered_line = -1
+    last_source_length = -1
+    menu_buf = -1
+    menu_winid = -1
+    new_last_filtered_line = -1
+    popups_update_timer = -1
+    preview_timer = -1
+    preview_winid = -1
+    source = []
+    source_is_being_computed = false
+    sourcetype = ''
+enddef
 #}}}1
 # Utility {{{1
+def Error(msg: string) #{{{2
+    echohl ErrorMsg
+    echom msg
+    echohl None
+enddef
+
+def EchoSourceAndFilterText() #{{{2
+    echohl ModeMsg
+    echo sourcetype->substitute('\l\zs\ze\u', ' ', 'g') .. ': '
+    echohl Title
+    echon filter_text
+    echohl NONE
+enddef
+
 def UtilityIsMissing(): bool #{{{2
     if sourcetype == 'HelpTags'
         if !executable('grep') || (!executable('perl') && !executable('awk'))
@@ -923,18 +1096,22 @@ def UtilityIsMissing(): bool #{{{2
             return true
         endif
     elseif sourcetype == 'Files'
+        # TODO: Use `fd(1)` (because faster).  If not available, fall back on `find(1)`.{{{
+        #
+        # I think `fd(1)`'s equivalent of `-ipath` is `--full-path`.
+        # Unfortunately, there is currently no equivalent of `-prune`.
+        # But there might be one soon:
+        # https://github.com/sharkdp/fd/pull/658
+        #
+        # Update: The PR has  been merged, but the latest binary  release is too
+        # old; it's not included yet.
+        #}}}
         if !executable('find')
             Error('Require find')
             return true
         endif
     endif
     return false
-enddef
-
-def Error(msg: string) #{{{2
-    echohl ErrorMsg
-    echom msg
-    echohl None
 enddef
 
 def BuflistedSorted(): list<string> #{{{2
@@ -965,80 +1142,6 @@ def Uniq(list: list<string>): list<string> #{{{2
         endif
     endfor
     return ret
-enddef
-
-def Popup_appendtext(text: list<dict<any>>) #{{{2
-    var lastlnum = line('$', menu_winid)
-
-    # append text
-    eval text
-        ->copy()
-        ->map({_, v -> v.text})
-        ->appendbufline(menu_buf, '$')
-
-    # apply text properties
-    # Can't use a nested `map()` because nested closures don't always work.{{{
-    #
-    #     eval text
-    #         ->map({i, v -> v.props->map({_, w -> call('prop_add',
-    #             [lastlnum + i + 1, w.col] + [extend(w, #{bufnr: menu_buf})])})})
-    #
-    # Here, `lastlnum` would always be – wrongly – evaluated to `1`.
-    #
-    # This is a known limitation: https://github.com/vim/vim/issues/7150
-    # It could be fixed one day, but I still prefer a `for` loop:
-    #
-    #    - it makes the code a little more readable
-    #    - it might be faster
-    #}}}
-    var i = 0
-    for d in text
-        eval d.props
-            ->map({_, v -> call('prop_add',
-                [lastlnum + i + 1, v.col] + [extend(v, #{bufnr: menu_buf})])})
-        i += 1
-    endfor
-enddef
-
-def Clean(closemenu = false) #{{{2
-    # the job  makes certain assumptions  (like the existence of  popups); let's
-    # stop it  first, to avoid  any issue if we  break one of  these assumptions
-    # later
-    var job_was_running = false
-    if job_status(myjob) == 'run'
-        job_was_running = true
-        job_stop(myjob)
-    endif
-
-    popup_close(preview_winid)
-    if closemenu
-        popup_close(menu_winid)
-    endif
-
-    # clear the message displayed at the command-line
-    echo ''
-    # TODO: We need this in case we exit the popup while a job is still running.{{{
-    #
-    # Otherwise, some job's callbacks might still  be invoked even after the job
-    # has been stopped.  They might call:
-    #
-    #     UpdatePopups() → UpdateMainText() → Popup_appendtext()
-    #
-    # The latter function assumes that `menu_buf` refers to an existing buffer.
-    #
-    # However, all  of this looks  ugly; the  job's callbacks should  not invoke
-    # `UpdatePopups()`.  At least, they should not do it unconditionally.
-    # We'll refactor how the popup is updated in the future.
-    # When you're done  with this refactoring, check whether we  still need this
-    # `sleep` and this `job_was_running`.
-    # To do a test, enter a directory  with a lot of files (e.g. `$HOME`), press
-    # `SPC ff`, then `ESC`.
-    #}}}
-    if job_was_running
-        sleep 1m
-    endif
-    # since this might break some assumptions in our code, let's keep it at the end
-    Reset()
 enddef
 
 def GetFindCmd(): string #{{{2
@@ -1121,18 +1224,35 @@ def ExpandTilde(path: string): string #{{{2
     return substitute(path, '^\~/', $HOME .. '/', '')
 enddef
 
-def Reset() #{{{2
-    menu_buf = 0
-    source = []
-    filtered_source = []
-    filter_text = ''
-    incomplete = ''
-    job_is_running = false
-    last_filtered_line = 0
-    last_filter_text = ''
+def MenuIsEmpty(): bool #{{{2
+    return line('$', menu_winid) == 1 && getbufline(menu_buf, 1) == ['']
 enddef
 
-def Menu_is_empty(): bool #{{{2
-    return line('$', menu_winid) == 1 && getbufline(menu_buf, 1) == ['']
+def FormatBigNumber(str: string): string #{{{2
+    # Problem: It's hard to quickly measure how big a number such as `123456789` is.
+    # Solution: Add commas to improve readability.{{{
+    #
+    #     123456789
+    #     →
+    #     123,456,789
+    #}}}
+    # Alternative Implementation:{{{
+    #
+    #     def FormatBigNumber(str: string): string
+    #         return split(str, '\zs')
+    #             ->reverse()
+    #             ->reduce({a, v -> substitute(a, ',', '', 'g')->len() % 3 == 2 ? ',' .. v .. a : v .. a})
+    #             ->trim(',', 0)
+    #     enddef
+    #
+    # Note: It's much slower.
+    #}}}
+    if len(str) <= 3
+        return str
+    elseif len(str) % 3 == 1
+        return str[0] .. ',' .. FormatBigNumber(str[1:])
+    else
+        return str[0] .. FormatBigNumber(str[1:])
+    endif
 enddef
 
