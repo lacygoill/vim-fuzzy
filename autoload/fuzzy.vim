@@ -44,28 +44,86 @@ vim9script
 # use the new feature to get an editable prompt.
 #}}}
 
-# TODO: Implement a mechanism which lets us mark multiple lines in the popup.
-# Use the sign column to display a sign besides any marked line.
+# TODO: Sometimes `Locate` is much slower than usual (from 8s to ≈ 45s).
+# And sometimes, `$ locate -r .` is much slower than usual (from .5s to 2.5s).
+# What's going on?
+# And btw, why is `Locate` so slow compared to `locate(1)`?
+# I don't think `Files` is that slow compared to `find(1)`.
 
-# TODO: Implement a  mechanism which  allows us  to run  arbitrary code  when we
-# press another key then Enter to close the popup.
-# For example,  if we press `C-q`,  we might want  all the selected lines  to be
-# used to populate the qfl.
-# Once done, post your solution here: <https://github.com/junegunn/fzf/issues/1885>
+# FIXME: Splitting the source in chunks fucks up the sorting.{{{
+#
+#     $ vim
+#     " press:  SPC fl
+#     " wait for the popup to be fully updated
+#     " type:  foobar
+#
+# The  first  line  is  not  that  good  (compared  to  `fzf(1)`,  and  even  to
+# `matchfuzzy()` when you pass it the output of `locate(1)` directly).
+#
+# Fix: After you've obtained `filtered_source`, re-run `matchfuzzypos()` against
+# it so that the most relevant lines come first.
+#
+# ---
+#
+# Issue:  But what if `filtered_source` is still huge?
+# We  can't  re-split  it  into   chunks,  because  the  purpose  of  re-running
+# `matchfuzzypos()` is  to fix the  sorting; that  can only be  achieved without
+# splitting.
+#
+# Workaround: Save each processed chunk independently.
+# If `filtered_source` gets too big,  don't re-run `matchfuzzypos()` against it;
+# re-run it against the first 10 lines of each chunk.
+# The rationale  being that beyond 10  lines, the match you're  interested in is
+# probably not there; or if it is, it should be quite easy to get it by refining
+# the filter text.
+# By  keeping   only  the  first  10   lines  of  each  chunk,   we  can  divide
+# `filtered_source`  by 1000  (10000/10).  Now,  suppose that  the maximum  size
+# above which `matchfuzzypos()` is too slow  is `50000`.  To reach it, you would
+# need a `filtered_source` of at least 50 millions lines.  That's absurdly huge.
+# In fact, if you get such a  source, I don't think running `matchfuzzypos()` on
+# `filtered_source`  is the  first issue;  the first  issue is  simply that  the
+# initial processing of the source is probably too long.
+#
+# Btw, if you get an absurdly huge source, maybe the plugin should bail out.
+# If it  does, it would make  sense to implement  an Ex command which  accepts a
+# pattern.  This way, even if a mapping  doesn't work (because the source is too
+# big),  we could  still feed  an arbitrary  pattern to  the plugin  via the  Ex
+# command, and (hopefully) get a more manageable initial source.
+# That would imply that we should not be  able to clear the whole filter text by
+# pressing `C-u`.  Pressing `C-u` should remove  all the text inserted after the
+# initial pattern, but not the latter (same thing with `C-h`).
+#
+# ---
+#
+# Btw, I  think we  should never append  lines in the  popup.  We  should always
+# reset all  the lines.   Indeed, any time  you've filtered a  new chunk  of the
+# source, you probably need  to re-filter all the lines in the  popup to fix the
+# sorting.
+#}}}
 
-# TODO: Implement `:FuzzyGrep`.
+# TODO: Once  the  previous  issue  is   fixed,  you'll  need  to  implement  an
+# hourglass-like indicator in  the popup's title.  You won't be  able to rely on
+# the  numbers growing  in the  title anymore.   Vim might  be still  processing
+# without any number growing.  Or the numbers could be growing erratically.  For
+# example, right now, if we use  `Locate`, and type `foobarbaz`, right after the
+# `z` is inserted, there is an unusal long  time for the title to go from `1/16`
+# to the final `1/32`.  We need a more predictable indicator.
+
+# TODO: Implement `Snippets`.
+#
+#     echo UltiSnips#SnippetsInCurrentScope()
+
+# TODO: Implement `Grep`.
 # https://vi.stackexchange.com/questions/10692/how-to-interactively-search-grep-with-vim/10693#10693
 #
 #     $ grep -RHn '.*' .
 #                      ^
 #                      Vim's cwd
 
-# TODO: Implement `:FuzzyBuffer`.
+# TODO: Implement `Buffer`.
 # https://vi.stackexchange.com/questions/308/regex-that-prefers-shorter-matches-within-a-match-this-is-more-involved-than-n
-# And maybe  `:FuzzyBuffers` (note the final  "s") to find some  needle in *all*
-# the buffers.
-#
-# What about `:FzBuffers` which look for all opened buffers?
+# And maybe  `Buffers` (note  the final "s")  to find some  needle in  *all* the
+# buffers.
 #
 # ---
 #
@@ -73,10 +131,14 @@ vim9script
 # asynchronously.  This is an issue, because it can block Vim for a long time.
 # Check out how vim-fileselect tackle this issue.
 
-# TODO: Implement `:FuzzySnippets`.
-
 # TODO: Integrate `unichar#complete#fuzzy()` here.
 # Or provide a public function (similar to `fzf#run()`)?
+
+# TODO: Implement a mechanism which lets us mark multiple lines in the popup.
+# Use the sign column to display a sign besides any marked line.
+
+# TODO: In the filter popup, if `C-q` is pressed, exit and populate the qfl with
+# all the selected lines.
 
 # TODO: Get rid of the Vim plugins fzf and fzf.vim.{{{
 #
@@ -107,9 +169,39 @@ vim9script
 # removing the plugins.
 #}}}
 
+# Config {{{1
+
 const TEXTWIDTH = 80
 # 2 popups = 4 borders
 const BORDERS = 4
+# There is no need to display *all* the filtered lines in the popup.{{{
+#
+# Suppose 10000 lines match your filter text; are you really going to select the
+# 5000th one?   Of course not.  You're  going to type more  characters to filter
+# out more lines, until the one you're looking for is visible.
+#
+# Why?  Because moving to  the 5000th one is stupidly slow,  and the whole point
+# of this plugin  is to save time.  To  give you an idea, it takes  about 25s to
+# select the 1000th entry.  That's already too much.  Note that our popup filter
+# lets us  jump to the  end by  pressing `C-g`, so  in practice, the line which
+# is needs the most time to be selected is the 500th one, not the 1000th one.
+# You'll need approximately 12s to reach it, which looks reasonable.
+#
+# ---
+#
+# Limiting the number of lines in the popup menu is also a useful optimization.
+# For example, if  the popup contains more  than a million lines,  and you start
+# typing your filter text, Vim will need a few seconds just to reset the popup:
+#
+#     popup_settext(menu_winid, '')
+#
+# There's not much we  can do to optimize that, except for  limiting the size of
+# the popup menu.
+#}}}
+const POPUP_MAXLINES = 1000
+
+const UPDATEPREVIEW_WAITINGTIME = 50
+const PREVIEW_MAXSIZE = 5 * pow(2, 20)
 
 # Maximum number of lines we're ok for `matchfuzzypos()` to process.{{{
 #
@@ -129,17 +221,16 @@ const BORDERS = 4
 #}}}
 const SOURCECHUNKSIZE = 10000
 
-const UPDATEPREVIEW_WAITINGTIME = 50
+# Init {{{1
 
 var filter_text = ''
+var filtered_source: list<dict<string>>
 var menu_buf = -1
 var menu_winid = -1
 var preview_winid = -1
-
-var filtered_source: list<dict<string>>
 var source: list<dict<string>>
-var sourcetype: string
 var source_is_being_computed = false
+var sourcetype: string
 
 # Interface {{{1
 def fuzzy#main(type: string) #{{{2
@@ -251,6 +342,8 @@ def InitSource() #{{{2
         InitFiles()
     elseif sourcetype == 'HelpTags'
         InitHelpTags()
+    elseif sourcetype == 'Locate'
+        InitLocate()
     elseif sourcetype == 'RecentFiles'
         InitRecentFiles()
     endif
@@ -342,7 +435,6 @@ enddef
 
 def InitFiles() #{{{2
     source_is_being_computed = true
-    var findcmd = GetFindCmd()
     # How slow is `find(1)`?{{{
     #
     # As  an example,  currently, `find(1)`  finds  around 300K  entries in  our
@@ -358,12 +450,8 @@ def InitFiles() #{{{2
     # with a command which has a fast output;  i.e. they need to drop *a lot* of
     # lines when displaying the output.
     #}}}
-    myjob = job_start(['/bin/sh', '-c', findcmd], #{
-        out_cb: SetIntermediateSource,
-        exit_cb: SetFinalSource,
-        mode: 'raw',
-        noblock: true,
-        })
+    var findcmd = GetFindCmd()
+    Job_start(findcmd)
 enddef
 
 var myjob: job
@@ -439,6 +527,14 @@ def InitHelpTags() #{{{2
         formatting_cmd = 'awk ' .. join(awkpgm, '')->shellescape()
     endif
 
+    # No need to use `rg(1)`; `grep(1)` is faster here.{{{
+    #
+    # If you still want to use `rg(1)`, make sure to suppress the display of the
+    # line and column numbers:
+    #
+    #     rg --no-line-number --no-column '.*' ...
+    #        ^--------------------------^
+    #}}}
     var shellpipeline = 'grep -H ".*" '
         .. map(tagfiles, {_, v -> shellescape(v)})
             ->sort()
@@ -452,16 +548,12 @@ def InitHelpTags() #{{{2
     # Right now, it takes about `.17s` which doesn't seem a lot.
     # But it's  noticeable; too  much for a  tool like a  fuzzy finder.
     # Besides, this duration might be longer on another machine.
-    # Also, remember that  we want to extend this plugin  to support other kinds
-    # of sources (not just  help tags).  Some of them might  be much bigger, and
-    # in that case, the shell command might take a much longer time.
     #}}}
-    job_start(['/bin/sh', '-c', shellpipeline], #{
-        out_cb: SetIntermediateSource,
-        exit_cb: SetFinalSource,
-        mode: 'raw',
-        noblock: true,
-        })
+    Job_start(shellpipeline)
+enddef
+
+def InitLocate() #{{{2
+    Job_start('locate -r .')
 enddef
 
 def InitRecentFiles() #{{{2
@@ -473,6 +565,15 @@ def InitRecentFiles() #{{{2
         ->filter({_, v -> v != '' && v != curbuf && !isdirectory(v)})
         ->Uniq()
         ->map({_, v -> #{text: fnamemodify(v, ':~:.'), trailing: '', location: ''}})
+enddef
+
+def Job_start(cmd: string) #{{{2
+    myjob = job_start(['/bin/sh', '-c', cmd], #{
+        out_cb: SetIntermediateSource,
+        exit_cb: SetFinalSource,
+        mode: 'raw',
+        noblock: true,
+        })
 enddef
 
 def SetIntermediateSource(_c: channel, data: string) #{{{2
@@ -496,8 +597,9 @@ def SetIntermediateSource(_c: channel, data: string) #{{{2
     # typed text  to be matched against  the filename.  Otherwise, we  might get
     # too many irrelevant results (test with the pattern "changes").
     #}}}
-    if sourcetype == 'Files'
+    if sourcetype == 'Files' || sourcetype == 'Locate'
         eval splitted_data
+            # TODO: How faster would be our code without this `map()`, on huge sources?
             ->map({_, v -> #{text: v, trailing: '', location: ''}})
             ->AppendSource()
     else
@@ -527,8 +629,8 @@ def SetFinalSource(...l: any) #{{{2
     # need to  be cleared now, otherwise,  the last help tag  will be duplicated
     # the next time we run `:FuzzyHelp`
     incomplete = ''
-    if sourcetype == 'Files'
-        [#{text: parts->join("\t")->trim("\<c-j>"), trailing: '', location: ''}]->AppendSource()
+    if sourcetype == 'Files' || sourcetype == 'Locate'
+        [#{text: parts->join("\t")->trim("\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
     else
         [#{text: parts[0], trailing: parts[1]->trim("\<c-j>"), location: ''}]->AppendSource()
         #                                           ^------^
@@ -705,11 +807,14 @@ def UpdateMainText() #{{{2
         current_source_length - 1
         ])
     var lines = source[last_filtered_line + 1 : new_last_filtered_line]
-    var highlighted_lines = GetHighlightedLines(lines)
+    var highlighted_lines = FilterAndHighlight(lines)
     if MenuIsEmpty()
-        popup_settext(menu_winid, highlighted_lines)
+        popup_settext(menu_winid, highlighted_lines[: POPUP_MAXLINES - 1])
     else
-        Popup_appendtext(highlighted_lines)
+        var lastline = line('$', menu_winid)
+        if lastline < POPUP_MAXLINES
+            Popup_appendtext(highlighted_lines[: POPUP_MAXLINES - lastline - 1])
+        endif
     endif
     last_filtered_line = new_last_filtered_line
 
@@ -740,7 +845,7 @@ def UpdateMainText() #{{{2
     EchoSourceAndFilterText()
 enddef
 
-def GetHighlightedLines(lines: list<dict<string>>): list<dict<any>> #{{{2
+def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
     # add info to get highlight via text properties
     if filter_text =~ '\S'
         var matches: list<dict<string>>
@@ -770,7 +875,7 @@ def GetHighlightedLines(lines: list<dict<string>>): list<dict<any>> #{{{2
 enddef
 
 def Popup_appendtext(text: list<dict<any>>) #{{{2
-    var lastlnum = line('$', menu_winid)
+    var lastline = line('$', menu_winid)
 
     # append text
     eval text
@@ -783,9 +888,9 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     #
     #     eval text
     #         ->map({i, v -> v.props->map({_, w -> call('prop_add',
-    #             [lastlnum + i + 1, w.col] + [extend(w, #{bufnr: menu_buf})])})})
+    #             [lastline + i + 1, w.col] + [extend(w, #{bufnr: menu_buf})])})})
     #
-    # Here, `lastlnum` would always be – wrongly – evaluated to `1`.
+    # Here, `lastline` would always be – wrongly – evaluated to `1`.
     #
     # This is a known limitation: https://github.com/vim/vim/issues/7150
     # It could be fixed one day, but I still prefer a `for` loop:
@@ -797,7 +902,7 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     for d in text
         eval d.props
             ->map({_, v -> call('prop_add',
-                [lastlnum + i + 1, v.col] + [extend(v, #{bufnr: menu_buf})])})
+                [lastline + i + 1, v.col] + [extend(v, #{bufnr: menu_buf})])})
         i += 1
     endfor
 enddef
@@ -830,10 +935,13 @@ def UpdateMainTitle() #{{{2
         popup_setoptions(menu_winid, #{title: newtitle})
         return
     endif
+
+    var curline = line('.', menu_winid)
+    var lastline = line('$', menu_winid)
     var newtitle = popup_getoptions(menu_winid)
         ->get('title', '')
-        ->substitute('\d\+', line('.', menu_winid), '')
-        ->substitute('/\zs\d\+', line('$', menu_winid), '')
+        ->substitute('\d\+', curline, '')
+        ->substitute('/\zs>\=\d\+', (len(filtered_source ?? source) > POPUP_MAXLINES ? '>' : '') .. lastline, '')
         ->substitute('(\zs[,0-9]\+\ze)', len(source)->string()->FormatBigNumber(), '')
     popup_setoptions(menu_winid, #{title: newtitle})
 enddef
@@ -885,7 +993,14 @@ def UpdatePreview(timerid = 0) #{{{2
         [filename, lnum] = matchlist[1:2]
         filename = ExpandTilde(filename)
     endif
+
     if !filereadable(filename)
+        return
+    # don't preview a huge file (takes too much time)
+    elseif getfsize(filename) > PREVIEW_MAXSIZE
+        win_execute(preview_winid, 'syn clear')
+        popup_settext(preview_winid, 'cannot preview file bigger than '
+            .. float2nr(PREVIEW_MAXSIZE / pow(2, 20)) .. ' MiB')
         return
     endif
 
@@ -905,7 +1020,20 @@ def UpdatePreview(timerid = 0) #{{{2
         # and won't  clear the  old ones;  IOW, your text  file will  be wrongly
         # highlighted with the Vim syntax.
         #}}}
-        var setsyntax = 'syn clear | do filetypedetect BufReadPost ' .. fnameescape(filename)
+        # `silent!` to suppress a possible error.{{{
+        #
+        # Such as the ones raised here:
+        #
+        #     $ vim --clean --cmd 'let mapleader = "\<s-f5>"' /tmp/file.adb
+        #     E329: No menu "PopUp"~
+        #     E488: Trailing characters: :call ada#List_Tag ()<CR>: al :call ada#List_Tag ()<CR>~
+        #     E329: No menu "Tag"~
+        #     ...~
+        #
+        # Those are  weird errors.  But the  point is that no  matter the error,
+        # we're not interested in reading its message now.
+        #}}}
+        var setsyntax = 'syn clear | sil! do filetypedetect BufReadPost ' .. fnameescape(filename)
         var fullconceal = '&l:cole = 3'
         var unfold = 'norm! zR'
         var whereAmI = sourcetype == 'Commands' || sourcetype =~ '^Mappings' ? '&l:cul = 1' : ''
@@ -988,8 +1116,8 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
         # See also:
         # https://github.com/vim/vim/issues/7178#issuecomment-714442958
         #}}}
-        if type == 'Files' || type == 'RecentFiles'
-            exe 'sp ' .. chosen->fnameescape()
+        if type == 'Files' || type == 'Locate' || type == 'RecentFiles'
+            SplitOrFocus(chosen)
 
         elseif type == 'HelpTags'
             exe 'h ' .. chosen
@@ -1004,7 +1132,7 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
             var filename: string
             var lnum: string
             [filename, lnum] = matchlist[1:2]
-            exe 'sp ' .. filename
+            SplitOrFocus(filename)
             exe 'norm! ' .. lnum .. 'G'
         endif
         norm! zv
@@ -1015,6 +1143,15 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
     finally
         Clean()
     endtry
+enddef
+
+def SplitOrFocus(filename: string)
+    var winList = filename->bufnr()->win_findbuf()
+    if empty(winList)
+        exe 'sp ' .. fnameescape(filename)
+    else
+        winList->get(0)->win_gotoid()
+    endif
 enddef
 
 def Clean(closemenu = false) #{{{2
@@ -1096,8 +1233,8 @@ enddef
 
 def UtilityIsMissing(): bool #{{{2
     if sourcetype == 'HelpTags'
-        if !executable('grep') || (!executable('perl') && !executable('awk'))
-            Error('Require grep and perl/awk')
+        if !(executable('rg') || executable('grep')) || !(executable('perl') || executable('awk'))
+            Error('Require rg/grep and perl/awk')
             return true
         endif
     elseif sourcetype == 'Files'
