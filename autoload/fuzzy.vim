@@ -44,12 +44,6 @@ vim9script
 # use the new feature to get an editable prompt.
 #}}}
 
-# TODO: Sometimes `Locate` is much slower than usual (from 8s to ≈ 45s).
-# And sometimes, `$ locate -r .` is much slower than usual (from .5s to 2.5s).
-# What's going on?
-# And btw, why is `Locate` so slow compared to `locate(1)`?
-# I don't think `Files` is that slow compared to `find(1)`.
-
 # FIXME: Splitting the source in chunks fucks up the sorting.{{{
 #
 #     $ vim
@@ -108,6 +102,13 @@ vim9script
 # example, right now, if we use  `Locate`, and type `foobarbaz`, right after the
 # `z` is inserted, there is an unusal long  time for the title to go from `1/16`
 # to the final `1/32`.  We need a more predictable indicator.
+
+# TODO: Sometimes `Locate` is much slower than usual (from 8s to ≈ 45s).
+# And sometimes, `$ locate /` is much slower than usual (from .5s to 4s).
+# What's going on?
+# And btw, why is `Locate` so slow compared to `locate(1)`?
+# I don't think `Files` is that slow compared to `find(1)`.
+# Is it because `Locate` finds much more files?
 
 # TODO: Implement `Snippets`.
 #
@@ -312,7 +313,7 @@ def fuzzy#main(type: string) #{{{2
         highlight: 'Normal',
         borderchars: ['─', '│', '─', '│', '┌', '┐', '┘', '└'],
         scrollbar: false,
-        filter: FilterLines,
+        filter: PopupFilter,
         callback: function(ExitCallback, [sourcetype]),
         }
 
@@ -434,7 +435,6 @@ def InitCommandsOrMappings() #{{{2
 enddef
 
 def InitFiles() #{{{2
-    source_is_being_computed = true
     # How slow is `find(1)`?{{{
     #
     # As  an example,  currently, `find(1)`  finds  around 300K  entries in  our
@@ -553,7 +553,7 @@ def InitHelpTags() #{{{2
 enddef
 
 def InitLocate() #{{{2
-    Job_start('locate -r .')
+    Job_start('locate /')
 enddef
 
 def InitRecentFiles() #{{{2
@@ -568,6 +568,7 @@ def InitRecentFiles() #{{{2
 enddef
 
 def Job_start(cmd: string) #{{{2
+    source_is_being_computed = true
     myjob = job_start(['/bin/sh', '-c', cmd], #{
         out_cb: SetIntermediateSource,
         exit_cb: SetFinalSource,
@@ -646,7 +647,7 @@ def AppendSource(l: list<dict<string>>) #{{{2
     MaybeUpdatePopups()
 enddef
 
-def FilterLines(id: number, key: string): bool #{{{2
+def PopupFilter(id: number, key: string): bool #{{{2
 # Handle the keys typed in the popup menu.
 # Narrow down the lines based on the keys typed so far.
 
@@ -687,6 +688,12 @@ def FilterLines(id: number, key: string): bool #{{{2
         || index(["\<down>", "\<c-n>"], key) >= 0 && curline == lastline
             return true
         endif
+
+        moving_in_popup = true
+        timer_stop(moving_in_popup_timer)
+        moving_in_popup_timer = timer_start(UPDATEPREVIEW_WAITINGTIME,
+            {-> execute('moving_in_popup = false')})
+
         var cmd = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
         win_execute(id, cmd)
         UpdatePopups(true)
@@ -723,6 +730,9 @@ def FilterLines(id: number, key: string): bool #{{{2
     return popup_filter_menu(id, key)
 enddef
 
+var moving_in_popup: bool
+var moving_in_popup_timer = -1
+
 def MaybeUpdatePopups() #{{{2
     var current_source_length = len(source)
 
@@ -750,10 +760,10 @@ def UpdatePopups(notTheMainText = false) #{{{2
 
     UpdateMainTitle()
 
-    # No need to update the preview on every keypress, when we're typing fast.
-    # Update only when we've paused for at least 50ms.
+    # no need to update the preview while we're moving in the popup with `C-n` and `C-p`
     timer_stop(preview_timer)
-    preview_timer = timer_start(UPDATEPREVIEW_WAITINGTIME, UpdatePreview)
+    var time = moving_in_popup ? UPDATEPREVIEW_WAITINGTIME : 0
+    preview_timer = timer_start(time, UpdatePreview)
 enddef
 
 var preview_timer = -1
@@ -814,6 +824,14 @@ def UpdateMainText() #{{{2
         var lastline = line('$', menu_winid)
         if lastline < POPUP_MAXLINES
             Popup_appendtext(highlighted_lines[: POPUP_MAXLINES - lastline - 1])
+        else
+            # If the popup is full, we no longer need to update it.{{{
+            #
+            # Nor do we need to process the rest of the source.
+            # Besides, returning now might prevent some unexpected flickering in
+            # the popup's title, when the popup is full.
+            #}}}
+            return
         endif
     endif
     last_filtered_line = new_last_filtered_line
@@ -980,7 +998,7 @@ def UpdatePreview(timerid = 0) #{{{2
         # a string.
         #}}}
         filename = globpath(&rtp, 'doc/' .. right, true, true)->get(0, '')
-    elseif sourcetype == 'Files' || sourcetype == 'RecentFiles'
+    elseif index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
         filename = ExpandTilde(left)->fnamemodify(':p')
     elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
         var matchlist = (filtered_source ?? source)
@@ -994,7 +1012,39 @@ def UpdatePreview(timerid = 0) #{{{2
         filename = ExpandTilde(filename)
     endif
 
+    popup_setoptions(preview_winid, #{title: ''})
     if !filereadable(filename)
+        win_execute(preview_winid, 'syn clear')
+        var text = #{
+            file: 'File not readable',
+            dir: 'Directory',
+            link: 'Symbolic link',
+            bdev: 'Block device',
+            cdev: 'Character device',
+            socket: 'Socket',
+            fifo: 'FIFO',
+            other: 'unknown',
+            }[getftype(filename)]
+        if text == 'Directory'
+            popup_settext(preview_winid, readdir(filename))
+            popup_setoptions(preview_winid, #{title: ' Directory'})
+        else
+            popup_settext(preview_winid, text)
+        endif
+        # FIXME: Use `Locate` and wait for the job to finish.{{{
+        #
+        # Then, keep pressing `C-n` until you reach the `lost+found/` directory.
+        #
+        #     Error detected while processing function <SNR>212_UpdatePreview:
+        #     line   76:
+        #     E484: Can't open file /lost+found/
+        #     Error detected while processing function <SNR>212_UpdatePreview[76]..<SNR>212_FilterLines:
+        #     line   74:
+        #     E1099: Unknown error while executing <SNR>212_ExitCallback
+        #
+        # First, find a MWE for the second error, and report it.
+        # Then, fix the first error.
+        #}}}
         return
     # don't preview a huge file (takes too much time)
     elseif getfsize(filename) > PREVIEW_MAXSIZE
@@ -1006,8 +1056,6 @@ def UpdatePreview(timerid = 0) #{{{2
 
     var text = readfile(filename)
     popup_settext(preview_winid, text)
-    # TODO: The preview window's title should  display the path to the previewed
-    # file (at least for mappings; not sure about the other types of sources).
 
     def Prettify()
         # Why clearing the syntax first?{{{
@@ -1040,7 +1088,7 @@ def UpdatePreview(timerid = 0) #{{{2
         win_execute(preview_winid, [setsyntax, fullconceal, unfold, whereAmI])
     enddef
 
-    # syntax highlight the text and make sure the cursor is at the relevant location
+    # syntax highlight the text
     if sourcetype == 'HelpTags'
         var setsyntax = [
             'if get(b:, "current_syntax", "") != "help"',
@@ -1048,7 +1096,7 @@ def UpdatePreview(timerid = 0) #{{{2
             'endif'
             ]
         var tagname = left->trim()->substitute("'", "''", 'g')->escape('\')
-        var searchcmd = printf("echo search('\\*\\V%s\\m\\*')", tagname)
+        var searchcmd = printf("echo search('\\*\\V%s\\m\\*', 'n')", tagname)
         # Why not just running `search()`?{{{
         #
         # If you just run `search()`, Vim won't redraw the preview popup.
@@ -1062,9 +1110,13 @@ def UpdatePreview(timerid = 0) #{{{2
     elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
         win_execute(preview_winid, 'norm! ' .. lnum .. 'Gzz')
         Prettify()
+        popup_setoptions(preview_winid, #{title: ' ' .. filename})
 
-    elseif sourcetype == 'Files' || sourcetype == 'RecentFiles'
+    elseif index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
         Prettify()
+        if sourcetype == 'Locate'
+            popup_setoptions(preview_winid, #{title: ' ' .. filename->fnamemodify(':t')})
+        endif
     endif
 enddef
 
@@ -1116,7 +1168,7 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
         # See also:
         # https://github.com/vim/vim/issues/7178#issuecomment-714442958
         #}}}
-        if type == 'Files' || type == 'Locate' || type == 'RecentFiles'
+        if index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
             SplitOrFocus(chosen)
 
         elseif type == 'HelpTags'
@@ -1207,6 +1259,8 @@ def Reset() #{{{2
     last_source_length = -1
     menu_buf = -1
     menu_winid = -1
+    moving_in_popup = false
+    moving_in_popup_timer = -1
     new_last_filtered_line = -1
     popups_update_timer = -1
     preview_timer = -1
