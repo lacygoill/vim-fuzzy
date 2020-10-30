@@ -93,6 +93,12 @@ vim9script
 # reset all  the lines.   Indeed, any time  you've filtered a  new chunk  of the
 # source, you probably need  to re-filter all the lines in the  popup to fix the
 # sorting.
+#
+# ---
+#
+# Would it  help if `matchfuzzypos()` could  give us the scores  of the filtered
+# items as  a separate  list?  Maybe  we could use  this list  to sort  back the
+# filtered chunks.
 #}}}
 
 # TODO: Once  the  previous  issue  is   fixed,  you'll  need  to  implement  an
@@ -454,8 +460,6 @@ def InitFiles() #{{{2
     Job_start(findcmd)
 enddef
 
-var myjob: job
-
 def InitHelpTags() #{{{2
     var tagfiles = globpath(&rtp, 'doc/tags', true, true)
 
@@ -577,6 +581,8 @@ def Job_start(cmd: string) #{{{2
         })
 enddef
 
+var myjob: job
+
 def SetIntermediateSource(_c: channel, data: string) #{{{2
     var _data: string
     if incomplete != ''
@@ -600,7 +606,14 @@ def SetIntermediateSource(_c: channel, data: string) #{{{2
     #}}}
     if sourcetype == 'Files' || sourcetype == 'Locate'
         eval splitted_data
-            # TODO: How faster would be our code without this `map()`, on huge sources?
+            # TODO: How faster would be our code without this `map()`, on huge sources?{{{
+            #
+            # Maybe we should get rid of this transformation.
+            # If you need to bind a location to a line, include it in the popup buffer.
+            # And if you don't want to see it, conceal it.
+            # That shouldn't  be too costly  now that we  limit the size  of the
+            # popup buffer to 1000 lines.
+            #}}}
             ->map({_, v -> #{text: v, trailing: '', location: ''}})
             ->AppendSource()
     else
@@ -1026,25 +1039,15 @@ def UpdatePreview(timerid = 0) #{{{2
             other: 'unknown',
             }[getftype(filename)]
         if text == 'Directory'
-            popup_settext(preview_winid, readdir(filename))
+            try
+                popup_settext(preview_winid, readdir(filename))
+            catch /^Vim\%((\a\+)\)\=:E484:/
+                popup_settext(preview_winid, 'Cannot read directory')
+            endtry
             popup_setoptions(preview_winid, #{title: ' Directory'})
         else
             popup_settext(preview_winid, text)
         endif
-        # FIXME: Use `Locate` and wait for the job to finish.{{{
-        #
-        # Then, keep pressing `C-n` until you reach the `lost+found/` directory.
-        #
-        #     Error detected while processing function <SNR>212_UpdatePreview:
-        #     line   76:
-        #     E484: Can't open file /lost+found/
-        #     Error detected while processing function <SNR>212_UpdatePreview[76]..<SNR>212_FilterLines:
-        #     line   74:
-        #     E1099: Unknown error while executing <SNR>212_ExitCallback
-        #
-        # First, find a MWE for the second error, and report it.
-        # Then, fix the first error.
-        #}}}
         return
     # don't preview a huge file (takes too much time)
     elseif getfsize(filename) > PREVIEW_MAXSIZE
