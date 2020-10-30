@@ -1037,7 +1037,7 @@ def UpdatePreview(timerid = 0) #{{{2
             socket: 'Socket',
             fifo: 'FIFO',
             other: 'unknown',
-            }[getftype(filename)]
+            }->get(getftype(filename), '')
         if text == 'Directory'
             try
                 popup_settext(preview_winid, readdir(filename))
