@@ -638,10 +638,10 @@ def SetFinalSource(...l: any) #{{{2
     #     E684: list index out of range: 1
     #}}}
     sleep 1m
-    var parts = split(incomplete, '\t')
     if sourcetype == 'Files' || sourcetype == 'Locate'
-        [#{text: parts->join("\t")->trim("\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
+        [#{text: trim(incomplete, "\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
     else
+        var parts = split(incomplete, '\t')
         [#{text: parts[0], trailing: parts[1]->trim("\<c-j>", 2), location: ''}]->AppendSource()
         #                                           ^------^
         #              the last line of the shell ouput ends
