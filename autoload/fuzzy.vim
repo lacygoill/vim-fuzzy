@@ -120,17 +120,16 @@ vim9script
 #
 #     echo UltiSnips#SnippetsInCurrentScope()
 
-# TODO: Implement `Grep`.
+# TODO: Implement `Rg`.
 # https://vi.stackexchange.com/questions/10692/how-to-interactively-search-grep-with-vim/10693#10693
 #
 #     $ grep -RHn '.*' .
 #                      ^
 #                      Vim's cwd
 
-# TODO: Implement `Buffer`.
+# TODO: Implement `BLines`.
 # https://vi.stackexchange.com/questions/308/regex-that-prefers-shorter-matches-within-a-match-this-is-more-involved-than-n
-# And maybe  `Buffers` (note  the final "s")  to find some  needle in  *all* the
-# buffers.
+# And maybe `Lines` to find some needle in *all* the buffers.
 #
 # ---
 #
@@ -640,18 +639,14 @@ def SetFinalSource(...l: any) #{{{2
     #}}}
     sleep 1m
     var parts = split(incomplete, '\t')
-    # need to  be cleared now, otherwise,  the last help tag  will be duplicated
-    # the next time we run `:FuzzyHelp`
-    incomplete = ''
     if sourcetype == 'Files' || sourcetype == 'Locate'
         [#{text: parts->join("\t")->trim("\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
     else
-        [#{text: parts[0], trailing: parts[1]->trim("\<c-j>"), location: ''}]->AppendSource()
+        [#{text: parts[0], trailing: parts[1]->trim("\<c-j>", 2), location: ''}]->AppendSource()
         #                                           ^------^
         #              the last line of the shell ouput ends
         #              with an undesirable trailing newline
     endif
-    source_is_being_computed = false
     UpdatePopups()
 enddef
 
@@ -1106,7 +1101,7 @@ def UpdatePreview(timerid = 0) #{{{2
         # You'll need to run `:redraw`; but the latter causes some flicker (with the
         # cursor, and in the statusline, tabline).
         #}}}
-        lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>")
+        lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>", 2)
         var showtag = 'norm! ' .. lnum .. 'G'
         win_execute(preview_winid, setsyntax + ['&l:cole = 3', showtag])
 
