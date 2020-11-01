@@ -763,7 +763,24 @@ var popups_update_timer = -1
 
 def UpdatePopups(notTheMainText = false) #{{{2
     if !notTheMainText
-        UpdateMainText()
+        try
+            UpdateMainText()
+        catch
+            echohl ErrorMsg
+            echom v:exception
+            echohl NONE
+            # We can't close the popup menu from `Clean()`.{{{
+            #
+            # It would cause the exit callback  to be invoked, which would cause
+            # `Clean()` to be invoked, which would cause the exit callback to be
+            # invoked... which would raise `E132`:
+            #
+            #     E132: Function call depth is higher than 'maxfuncdepth'
+            #}}}
+            popup_close(menu_winid)
+            Clean()
+            return
+        endtry
     endif
 
     UpdateMainTitle()
@@ -1205,7 +1222,7 @@ def SplitOrFocus(filename: string)
     endif
 enddef
 
-def Clean(closemenu = false) #{{{2
+def Clean() #{{{2
     # the job  makes certain assumptions  (like the existence of  popups); let's
     # stop it  first, to avoid  any issue if we  break one of  these assumptions
     # later
@@ -1218,9 +1235,6 @@ def Clean(closemenu = false) #{{{2
     timer_stop(popups_update_timer)
 
     popup_close(preview_winid)
-    if closemenu
-        popup_close(menu_winid)
-    endif
 
     # TODO: We need this in case we exit the popup while a job is still running.{{{
     #
