@@ -959,6 +959,7 @@ def UpdateMainTitle() #{{{2
             #}}}
             ->substitute('\d\+/\d\+ ([,0-9]\+)', len(source)->printf('0/0 (%d)'), '')
         popup_setoptions(menu_winid, #{title: newtitle})
+        popup_setoptions(preview_winid, #{title: ''})
         return
     endif
 
