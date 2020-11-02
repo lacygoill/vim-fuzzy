@@ -78,15 +78,6 @@ vim9script
 # `filtered_source`  is the  first issue;  the first  issue is  simply that  the
 # initial processing of the source is probably too long.
 #
-# Btw, if you get an absurdly huge source, maybe the plugin should bail out.
-# If it  does, it would make  sense to implement  an Ex command which  accepts a
-# pattern.  This way, even if a mapping  doesn't work (because the source is too
-# big),  we could  still feed  an arbitrary  pattern to  the plugin  via the  Ex
-# command, and (hopefully) get a more manageable initial source.
-# That would imply that we should not be  able to clear the whole filter text by
-# pressing `C-u`.  Pressing `C-u` should remove  all the text inserted after the
-# initial pattern, but not the latter (same thing with `C-h`).
-#
 # ---
 #
 # Btw, I  think we  should never append  lines in the  popup.  We  should always
@@ -109,6 +100,21 @@ vim9script
 # `z` is inserted, there is an unusal long  time for the title to go from `1/16`
 # to the final `1/32`.  We need a more predictable indicator.
 
+# TODO: If we get an absurdly huge source, the plugin should bail out.
+
+# TODO: For each mapping, implement the counterpart Ex command.
+# It would be especially useful for huge sources.
+# For example:
+#
+#     :Files
+#     # too many lines; the plugin is slow, or it bails out
+#
+#     :Files pat
+#     # much fewer lines; the plugin is fast, or at least it doesn't bail out
+#
+# If we supply an  initial pattern to an Ex command, we should  never be able to
+# remove any character from it (be it with `C-u`, `C-h`, `BS`).
+
 # TODO: Sometimes `Locate` is much slower than usual (from 8s to ≈ 45s).
 # And sometimes, `$ locate /` is much slower than usual (from .5s to 4s).
 # What's going on?
@@ -116,35 +122,63 @@ vim9script
 # I don't think `Files` is that slow compared to `find(1)`.
 # Is it because `Locate` finds much more files?
 
-# TODO: Implement `Snippets`.
+# TODO: Implement `:Snippets`.
 #
 #     echo UltiSnips#SnippetsInCurrentScope()
-
-# TODO: Implement `Rg`.
-# https://vi.stackexchange.com/questions/10692/how-to-interactively-search-grep-with-vim/10693#10693
-#
-#     $ grep -RHn '.*' .
-#                      ^
-#                      Vim's cwd
-
-# TODO: Implement `BLines`.
-# https://vi.stackexchange.com/questions/308/regex-that-prefers-shorter-matches-within-a-match-this-is-more-involved-than-n
-# And maybe `Lines` to find some needle in *all* the buffers.
-#
-# ---
-#
-# This  is an  example of  source  which can  be  huge, but  cannot be  obtained
-# asynchronously.  This is an issue, because it can block Vim for a long time.
-# Check out how vim-fileselect tackle this issue.
-
-# TODO: Integrate `unichar#complete#fuzzy()` here.
-# Or provide a public function (similar to `fzf#run()`)?
 
 # TODO: Implement a mechanism which lets us mark multiple lines in the popup.
 # Use the sign column to display a sign besides any marked line.
 
 # TODO: In the filter popup, if `C-q` is pressed, exit and populate the qfl with
 # all the selected lines.
+
+# TODO: Implement `:Rg`.{{{
+#
+#     $ rg --follow --glob='!.git/*' --hidden --smart-case --vimgrep '.*' .
+#                                                                         ^
+#                                                                         Vim's cwd
+#
+# Note that our  `rg(1)` use all these command-line options  by default, because
+# we wrote them in `~/.config/ripgreprc`, and because we've set this environment
+# variable in `~/.zshenv`:
+#
+#     export RIPGREP_CONFIG_PATH="$HOME/.config/ripgreprc"
+#
+# Do we still want to specify them in our Vim plugin?
+#
+# ---
+#
+# For small sources, `grep(1)` *might* be faster.  Make some tests.
+#
+#     $ grep -RHn '.*' .
+#}}}
+# TODO: Implement `:BLines` (lines in the current buffer).{{{
+#
+# And maybe `:Lines` to find some needle in *all* the buffers.
+#
+# ---
+#
+# This  is an  example of  source  which can  be  huge, but  cannot be  obtained
+# asynchronously.  This is an issue, because it can block Vim for a long time.
+# Check out how `vim-fileselect` tackle this issue.
+#}}}
+# TODO: Implement `:Unichar`.{{{
+#
+# Check out `unichar#complete#fuzzy()`.
+# Or maybe we should just invoke `fuzzy#main()` from `vim-unichar`?
+#}}}
+# TODO: Implement `:BCommits`; git commits for the current buffer.
+# TODO: Implement `:BTags`; tags in the current buffer.
+# TODO: Implement `:Buffers`; open buffers.
+# TODO: Implement `:Commits`; git commits.
+# TODO: Implement `:GFiles`; git files; `git ls-files`.
+# TODO: Implement `:GFiles?`; git files; `git status`.
+# TODO: Implement `:Marks`.
+# TODO: Implement `:RecentExCommands`.
+# TODO: Implement `:RecentSearchCommands`.
+# TODO: Implement `:Registers`.
+# TODO: Implement `:Tags`; tags in the project.
+# TODO: Implement `:Windows`; open windows.
 
 # TODO: Get rid of the Vim plugins fzf and fzf.vim.{{{
 #
