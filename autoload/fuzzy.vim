@@ -171,8 +171,9 @@ vim9script
 # TODO: Implement `:BTags`; tags in the current buffer.
 # TODO: Implement `:Buffers`; open buffers.
 # TODO: Implement `:Commits`; git commits.
-# TODO: Implement `:GFiles`; git files; `git ls-files`.
 # TODO: Implement `:GFiles?`; git files; `git status`.
+# TODO: Implement `:GFiles`; git files; `git ls-files`.
+# TODO: Implement `:Highlight`; highlight groups.
 # TODO: Implement `:Marks`.
 # TODO: Implement `:RecentExCommands`.
 # TODO: Implement `:RecentSearchCommands`.
@@ -263,6 +264,8 @@ const SOURCECHUNKSIZE = 10000
 
 # Init {{{1
 
+import Profile from 'lg.vim'
+
 var filter_text = ''
 var filtered_source: list<dict<string>>
 var menu_buf = -1
@@ -274,6 +277,7 @@ var sourcetype: string
 
 # Interface {{{1
 def fuzzy#main(type: string) #{{{2
+    Profile()
     # Without this reset, we might wrongly re-use a stale source.{{{
     #
     #     $ cd && vim
@@ -330,7 +334,7 @@ def fuzzy#main(type: string) #{{{2
     var width = min([TEXTWIDTH, &columns - BORDERS])
     var line = &lines - &ch - statusline - height - 1
 
-    var opts = #{
+    var opts = {
         line: line,
         col: (&columns - TEXTWIDTH - BORDERS) / 2,
         pos: 'topleft',
@@ -359,12 +363,12 @@ def fuzzy#main(type: string) #{{{2
     # create popup menu
     menu_winid = popup_menu('', opts)
     menu_buf = winbufnr(menu_winid)
-    prop_type_add('fuzzyMatch', #{bufnr: menu_buf, highlight: 'Title'})
-    prop_type_add('fuzzyTrailing', #{bufnr: menu_buf, highlight: 'Comment'})
+    prop_type_add('fuzzyMatch', {bufnr: menu_buf, highlight: 'Title'})
+    prop_type_add('fuzzyTrailing', {bufnr: menu_buf, highlight: 'Comment'})
 
     # create preview
     opts = popup_getoptions(menu_winid)
-    extend(opts, #{line: opts.line - (height + BORDERS / 2)})
+    opts['line'] = opts.line - (height + BORDERS / 2)
     remove(opts, 'callback')
     remove(opts, 'cursorline')
     remove(opts, 'filter')
@@ -434,7 +438,7 @@ def InitCommandsOrMappings() #{{{2
         # split after every "Last set from ..." line
         ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
         # transforms each pair of lines into a dictionary
-        ->map({_, v -> #{
+        ->map({_, v -> {
             text: matchstr(v, relevant)->substitute(noise, '', ''),
             # `matchstr()` extracts the filename.{{{
             #
@@ -467,7 +471,7 @@ def InitCommandsOrMappings() #{{{2
         ->map({_, v -> v.text->matchstr('^\S*')->strchars(true)})
         ->max()
     longest_name = min([35, longest_name])
-    source->map({_, v -> extend(v, #{
+    source->map({_, v -> extend(v, {
         text: matchstr(v.text, '^\S*')->printf('%-' .. longest_name .. 'S')
             .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
         })})
@@ -601,12 +605,12 @@ def InitRecentFiles() #{{{2
     source = recentfiles
         ->filter({_, v -> v != '' && v != curbuf && !isdirectory(v)})
         ->Uniq()
-        ->map({_, v -> #{text: fnamemodify(v, ':~:.'), trailing: '', location: ''}})
+        ->map({_, v -> {text: fnamemodify(v, ':~:.'), trailing: '', location: ''}})
 enddef
 
 def Job_start(cmd: string) #{{{2
     source_is_being_computed = true
-    myjob = job_start(['/bin/sh', '-c', cmd], #{
+    myjob = job_start(['/bin/sh', '-c', cmd], {
         out_cb: SetIntermediateSource,
         exit_cb: SetFinalSource,
         mode: 'raw',
@@ -647,12 +651,12 @@ def SetIntermediateSource(_c: channel, data: string) #{{{2
             # That shouldn't  be too costly  now that we  limit the size  of the
             # popup buffer to 1000 lines.
             #}}}
-            ->map({_, v -> #{text: v, trailing: '', location: ''}})
+            ->map({_, v -> {text: v, trailing: '', location: ''}})
             ->AppendSource()
     else
         eval splitted_data
             ->map({_, v -> split(v, '\t')})
-            ->map({_, v -> #{text: v[0], trailing: v[1], location: ''}})
+            ->map({_, v -> {text: v[0], trailing: v[1], location: ''}})
             ->AppendSource()
     endif
 enddef
@@ -673,13 +677,13 @@ def SetFinalSource(...l: any) #{{{2
     #}}}
     sleep 1m
     if sourcetype == 'Files' || sourcetype == 'Locate'
-        [#{text: trim(incomplete, "\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
+        [{text: trim(incomplete, "\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
     else
         var parts = split(incomplete, '\t')
-        [#{text: parts[0], trailing: parts[1]->trim("\<c-j>", 2), location: ''}]->AppendSource()
-        #                                           ^------^
-        #              the last line of the shell ouput ends
-        #              with an undesirable trailing newline
+        [{text: parts[0], trailing: parts[1]->trim("\<c-j>", 2), location: ''}]->AppendSource()
+        #                                          ^------^
+        #             the last line of the shell ouput ends
+        #             with an undesirable trailing newline
     endif
     UpdatePopups()
 enddef
@@ -761,6 +765,17 @@ def PopupFilter(id: number, key: string): bool #{{{2
     # reset the cursor position in the preview popup
     elseif key == "\<m-r>" || key == "\<f29>"
         UpdatePreview()
+        return true
+
+    elseif index(["\<c-s>", "\<c-t>", "\<c-v>"], key) >= 0
+        popup_close(id, {
+            howtoopen: {
+                ["\<c-s>"]: 'insplit',
+                ["\<c-t>"]: 'intab',
+                ["\<c-v>"]: 'invertsplit'
+                }[key],
+            idx: line('.', id),
+        })
         return true
 
     # prevent title from  flickering when `CursorHold` is fired, and  we have at
@@ -927,25 +942,25 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
     if filter_text =~ '\S'
         var matches: list<dict<string>>
         var pos: list<list<number>>
-        [matches, pos] = matchfuzzypos(lines, filter_text, #{key: 'text'})
+        [matches, pos] = matchfuzzypos(lines, filter_text, {key: 'text'})
         # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
         # works as expected later (i.e. can determine which entry we've chosen).
         filtered_source += matches
 
         return matches
-            ->map({i, v -> #{
+            ->map({i, v -> {
                 text: v.text .. "\t" .. v.trailing,
-                props: map(pos[i], {_, w -> #{col: w + 1, length: 1, type: 'fuzzyMatch'}})
-                    + [#{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
+                props: map(pos[i], {_, w -> {col: w + 1, length: 1, type: 'fuzzyMatch'}})
+                    + [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
                 location: v.location,
                 }})
     else
         return lines
             # need a copy to not mutate `source` (or a slice of it)
             ->copy()
-            ->map({_, v -> #{
+            ->map({_, v -> {
                 text: v.text .. "\t" .. v.trailing,
-                props: [#{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
+                props: [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
                 location: v.location,
                 }})
     endif
@@ -965,7 +980,7 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     #
     #     eval text
     #         ->map({i, v -> v.props->map({_, w -> call('prop_add',
-    #             [lastline + i + 1, w.col] + [extend(w, #{bufnr: menu_buf})])})})
+    #             [lastline + i + 1, w.col] + [extend(w, {bufnr: menu_buf})])})})
     #
     # Here, `lastline` would always be – wrongly – evaluated to `1`.
     #
@@ -979,7 +994,7 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     for d in text
         eval d.props
             ->map({_, v -> call('prop_add',
-                [lastline + i + 1, v.col] + [extend(v, #{bufnr: menu_buf})])})
+                [lastline + i + 1, v.col] + [extend(v, {bufnr: menu_buf})])})
         i += 1
     endfor
 enddef
@@ -1009,8 +1024,8 @@ def UpdateMainTitle() #{{{2
             # Then, the total won't be updated in the title.
             #}}}
             ->substitute('\d\+/\d\+ ([,0-9]\+)', len(source)->printf('0/0 (%d)'), '')
-        popup_setoptions(menu_winid, #{title: newtitle})
-        popup_setoptions(preview_winid, #{title: ''})
+        popup_setoptions(menu_winid, {title: newtitle})
+        popup_setoptions(preview_winid, {title: ''})
         return
     endif
 
@@ -1021,7 +1036,7 @@ def UpdateMainTitle() #{{{2
         ->substitute('\d\+', curline, '')
         ->substitute('/\zs>\=\d\+', (len(filtered_source ?? source) > POPUP_MAXLINES ? '>' : '') .. lastline, '')
         ->substitute('(\zs[,0-9]\+\ze)', len(source)->string()->FormatBigNumber(), '')
-    popup_setoptions(menu_winid, #{title: newtitle})
+    popup_setoptions(menu_winid, {title: newtitle})
 enddef
 
 def UpdatePreview(timerid = 0) #{{{2
@@ -1072,10 +1087,10 @@ def UpdatePreview(timerid = 0) #{{{2
         filename = ExpandTilde(filename)
     endif
 
-    popup_setoptions(preview_winid, #{title: ''})
+    popup_setoptions(preview_winid, {title: ''})
     if !filereadable(filename)
         win_execute(preview_winid, 'syn clear')
-        var text = #{
+        var text = {
             file: 'File not readable',
             dir: 'Directory',
             link: 'Symbolic link',
@@ -1091,7 +1106,7 @@ def UpdatePreview(timerid = 0) #{{{2
             catch /^Vim\%((\a\+)\)\=:E484:/
                 popup_settext(preview_winid, 'Cannot read directory')
             endtry
-            popup_setoptions(preview_winid, #{title: ' Directory'})
+            popup_setoptions(preview_winid, {title: ' Directory'})
         else
             popup_settext(preview_winid, text)
         endif
@@ -1160,28 +1175,33 @@ def UpdatePreview(timerid = 0) #{{{2
     elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
         win_execute(preview_winid, 'norm! ' .. lnum .. 'Gzz')
         Prettify()
-        popup_setoptions(preview_winid, #{title: ' ' .. filename})
+        popup_setoptions(preview_winid, {title: ' ' .. filename})
 
     elseif index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
         Prettify()
         if sourcetype == 'Locate'
-            popup_setoptions(preview_winid, #{title: ' ' .. filename->fnamemodify(':t')})
+            popup_setoptions(preview_winid, {title: ' ' .. filename->fnamemodify(':t')})
         endif
     endif
 enddef
 
-def ExitCallback(type: string, id: number, result: number) #{{{2
-    if result <= 0
+def ExitCallback(type: string, id: number, result: any) #{{{2
+    var idx: any = result
+    var howtoopen = ''
+    if type(result) == v:t_number && result <= 0
         # If a job  has been started, and  we want to kill it  by pressing `C-c`
         # because  it takes  too much  time, `job_stop()`  must be  invoked here
         # (which `Clean()` does).
         Clean()
         return
+    elseif type(result) == v:t_dict
+        idx = result.idx
+        howtoopen = result.howtoopen
     endif
 
     try
         var chosen = (filtered_source ?? source)
-            ->get(result - 1, {})
+            ->get(idx - 1, {})
             ->get('text', '')
             ->split('\t')
             ->get(0, '')
@@ -1219,13 +1239,13 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
         # https://github.com/vim/vim/issues/7178#issuecomment-714442958
         #}}}
         if index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
-            SplitOrFocus(chosen)
+            Open(chosen, howtoopen)
 
         elseif type == 'HelpTags'
             exe 'h ' .. chosen
 
         elseif type == 'Commands' || type =~ '^Mappings'
-            var matchlist = get(filtered_source ?? source, result - 1, {})
+            var matchlist = get(filtered_source ?? source, idx - 1, {})
                 ->get('location')
                 ->matchlist('Last set from \(.*\) line \(\d\+\)$')
             if len(matchlist) < 3
@@ -1234,7 +1254,7 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
             var filename: string
             var lnum: string
             [filename, lnum] = matchlist[1:2]
-            SplitOrFocus(filename)
+            Open(filename, howtoopen)
             exe 'norm! ' .. lnum .. 'G'
         endif
         norm! zv
@@ -1247,13 +1267,10 @@ def ExitCallback(type: string, id: number, result: number) #{{{2
     endtry
 enddef
 
-def SplitOrFocus(filename: string)
-    var winList = filename->bufnr()->win_findbuf()
-    if empty(winList)
-        exe 'sp ' .. fnameescape(filename)
-    else
-        winList->get(0)->win_gotoid()
-    endif
+def Open(filename: string, how: string)
+    var file = filename->fnameescape()
+    var cmd = get({insplit: 'sp', intab: 'tabe', invertsplit: 'vs'}, how, 'e')
+    exe cmd .. ' ' .. file
 enddef
 
 def Clean() #{{{2
@@ -1365,9 +1382,9 @@ def BuflistedSorted(): list<string> #{{{2
     # would change; i.e. the sorting would no longer be based on the last time a buffer
     # was active, but on the last time it was changed.
     #}}}
-    return getbufinfo(#{buflisted: true})
+    return getbufinfo({buflisted: true})
         ->filter({_, v -> getbufvar(v.bufnr, '&buftype', '') == ''})
-        ->map({_, v -> #{bufnr: v.bufnr, lastused: v.lastused}})
+        ->map({_, v -> {bufnr: v.bufnr, lastused: v.lastused}})
         # the most recently active buffers first;
         # for 2 buffers accessed in the same second, the one with the bigger number first
         # (because it's the most recently created one)
