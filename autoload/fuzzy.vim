@@ -132,7 +132,7 @@ vim9script
 # TODO: In the filter popup, if `C-q` is pressed, exit and populate the qfl with
 # all the selected lines.
 
-# TODO: Implement `:Rg`.{{{
+# TODO: Implement `:FzRg`.{{{
 #
 #     $ rg --follow --glob='!.git/*' --hidden --smart-case --vimgrep '.*' .
 #                                                                         ^
@@ -152,7 +152,7 @@ vim9script
 #
 #     $ grep -RHn '.*' .
 #}}}
-# TODO: Implement `:BLines` (lines in the current buffer).{{{
+# TODO: Implement `:FzBLines` (lines in the current buffer).{{{
 #
 # And maybe `:Lines` to find some needle in *all* the buffers.
 #
@@ -162,24 +162,25 @@ vim9script
 # asynchronously.  This is an issue, because it can block Vim for a long time.
 # Check out how `vim-fileselect` tackle this issue.
 #}}}
-# TODO: Implement `:Unichar`.{{{
+# TODO: Implement `:FzUnichar`.{{{
 #
 # Check out `unichar#complete#fuzzy()`.
 # Or maybe we should just invoke `fuzzy#main()` from `vim-unichar`?
 #}}}
-# TODO: Implement `:BCommits`; git commits for the current buffer.
-# TODO: Implement `:BTags`; tags in the current buffer.
-# TODO: Implement `:Buffers`; open buffers.
-# TODO: Implement `:Commits`; git commits.
-# TODO: Implement `:GFiles?`; git files; `git status`.
-# TODO: Implement `:GFiles`; git files; `git ls-files`.
-# TODO: Implement `:Highlight`; highlight groups.
-# TODO: Implement `:Marks`.
-# TODO: Implement `:RecentExCommands`.
-# TODO: Implement `:RecentSearchCommands`.
-# TODO: Implement `:Registers`.
-# TODO: Implement `:Tags`; tags in the project.
-# TODO: Implement `:Windows`; open windows.
+# TODO: Implement `:FzBCommits`; git commits for the current buffer.
+# TODO: Implement `:FzBTags`; tags in the current buffer.
+# TODO: Implement `:FzBuffers`; open buffers.
+# TODO: Implement `:FzCommits`; git commits.
+# TODO: Implement `:FzGFiles?`; git files; `git status`.
+# TODO: Implement `:FzGFiles`; git files; `git ls-files`.
+# TODO: Implement `:FzHighlight`; highlight groups.
+# TODO: Implement `:FzMan`; man pages.
+# TODO: Implement `:FzMarks`.
+# TODO: Implement `:FzRecentExCommands`.
+# TODO: Implement `:FzRecentSearchCommands`.
+# TODO: Implement `:FzRegisters`.
+# TODO: Implement `:FzTags`; tags in the project.
+# TODO: Implement `:FzWindows`; open windows.
 
 # TODO: Get rid of the Vim plugins fzf and fzf.vim.{{{
 #
@@ -466,9 +467,8 @@ def InitCommandsOrMappings() #{{{2
     endif
 
     # align all the names of commands/mappings in a field (max 35 cells)
-    var longest_name = source
-        ->copy()
-        ->map({_, v -> v.text->matchstr('^\S*')->strchars(true)})
+    var longest_name = mapnew(source,
+            {_, v -> v.text->matchstr('^\S*')->strchars(true)})
         ->max()
     longest_name = min([35, longest_name])
     source->map({_, v -> extend(v, {
@@ -955,10 +955,8 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
                 location: v.location,
                 }})
     else
-        return lines
-            # need a copy to not mutate `source` (or a slice of it)
-            ->copy()
-            ->map({_, v -> {
+        # need `mapnew()` instead of `map()` to not mutate `source` (or a slice of it)
+        return mapnew(lines, {_, v -> {
                 text: v.text .. "\t" .. v.trailing,
                 props: [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
                 location: v.location,
@@ -970,9 +968,7 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     var lastline = line('$', menu_winid)
 
     # append text
-    eval text
-        ->copy()
-        ->map({_, v -> v.text})
+    eval mapnew(text, {_, v -> v.text})
         ->appendbufline(menu_buf, '$')
 
     # apply text properties
