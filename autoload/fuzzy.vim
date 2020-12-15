@@ -620,15 +620,15 @@ enddef
 
 var myjob: job
 
-def SetIntermediateSource(_c: channel, data: string) #{{{2
-    var _data: string
+def SetIntermediateSource(_c: channel, argdata: string) #{{{2
+    var data: string
     if incomplete != ''
-        _data = incomplete .. data
+        data = incomplete .. argdata
     else
-        _data = data
+        data = argdata
     endif
-    var splitted_data = split(_data, '\n\ze.')
-    # The last line of `data` does not necessarily match a full shell output line.
+    var splitted_data = split(data, '\n\ze.')
+    # The last line of `argdata` does not necessarily match a full shell output line.
     # Most of the time, it's incomplete.
     incomplete = remove(splitted_data, -1)
     if len(splitted_data) == 0
@@ -1354,13 +1354,8 @@ def UtilityIsMissing(): bool #{{{2
     elseif sourcetype == 'Files'
         # TODO: Use `fd(1)` (because faster).  If not available, fall back on `find(1)`.{{{
         #
-        # I think `fd(1)`'s equivalent of `-ipath` is `--full-path`.
-        # Unfortunately, there is currently no equivalent of `-prune`.
-        # But there might be one soon:
-        # https://github.com/sharkdp/fd/pull/658
-        #
-        # Update: The PR has  been merged, but the latest binary  release is too
-        # old; it's not included yet.
+        # I think  `fd(1)`'s equivalent  of `-ipath`  is `--full-path`,  and the
+        # equivalent of `-prune` is `--prune`.
         #}}}
         if !executable('find')
             Error('Require find')
