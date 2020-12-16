@@ -167,10 +167,10 @@ vim9script
 # Check out `unichar#complete#fuzzy()`.
 # Or maybe we should just invoke `fuzzy#main()` from `vim-unichar`?
 #}}}
+# TODO: Implement `:FzCommits`; git commits.
 # TODO: Implement `:FzBCommits`; git commits for the current buffer.
 # TODO: Implement `:FzBTags`; tags in the current buffer.
 # TODO: Implement `:FzBuffers`; open buffers.
-# TODO: Implement `:FzCommits`; git commits.
 # TODO: Implement `:FzGFiles?`; git files; `git status`.
 # TODO: Implement `:FzGFiles`; git files; `git ls-files`.
 # TODO: Implement `:FzHighlight`; highlight groups.
@@ -181,6 +181,8 @@ vim9script
 # TODO: Implement `:FzRegisters`.
 # TODO: Implement `:FzTags`; tags in the project.
 # TODO: Implement `:FzWindows`; open windows.
+# TODO: Should we use `delta(1)` for `:FzCommits`, `:FzBCommits`, `FzGFiles?` to format git's output?
+# If interested, see how `fzf.vim` does it.
 
 # TODO: Get rid of the Vim plugins fzf and fzf.vim.{{{
 #
