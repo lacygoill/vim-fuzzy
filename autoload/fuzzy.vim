@@ -1386,8 +1386,8 @@ def BuflistedSorted(): list<string> #{{{2
 enddef
 
 def Uniq(list: list<string>): list<string> #{{{2
-    var visited = {}
-    var ret = []
+    var visited: dict<number>
+    var ret: list<string>
     for path in list
         if !empty(path) && !has_key(visited, path)
             add(ret, path)
