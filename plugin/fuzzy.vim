@@ -1,9 +1,7 @@
-vim9script
+vim9script noclear
 
-if exists('g:loaded_fuzzy')
-    finish
-endif
-g:loaded_fuzzy = 1
+if exists('loaded') | finish | endif
+var loaded = true
 
 nno <space>fc <cmd>call fuzzy#main('Commands')<cr>
 nno <space>ff <cmd>call fuzzy#main('Files')<cr>

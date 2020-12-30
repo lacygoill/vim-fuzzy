@@ -1,4 +1,7 @@
-vim9script
+vim9script noclear
+
+if exists('loaded') | finish | endif
+var loaded = true
 
 # I want to be able to edit my input!{{{
 #
@@ -35,7 +38,7 @@ vim9script
 #    > I'm leaning to denite style pattern but that means it won't work in popup.
 #    > vim-clap already seems to be hitting this issue.
 #
-# It has been acknowledged in the todo list.  From `:h todo /^Popup`
+# It has been acknowledged in the todo list.  From `:h todo /^Popup`:
 #
 #    > Popup windows:
 #    > - Add a flag to make a popup window focusable?
@@ -420,7 +423,7 @@ def InitCommandsOrMappings() #{{{2
         #}}}
         noise = '^\S*\zs.*\ze\%43c.*'
     elseif sourcetype =~ '^Mappings'
-        cmd = 'verb ' .. sourcetype[-2:-2]->tolower() .. 'map'
+        cmd = 'verb ' .. sourcetype[-2 : -2]->tolower() .. 'map'
         # The first 3 characters are used for the mode.{{{
         #
         #     nox<key> ...
@@ -441,7 +444,7 @@ def InitCommandsOrMappings() #{{{2
         # split after every "Last set from ..." line
         ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
         # transforms each pair of lines into a dictionary
-        ->map({_, v -> {
+        ->map((_, v) => ({
             text: matchstr(v, relevant)->substitute(noise, '', ''),
             # `matchstr()` extracts the filename.{{{
             #
@@ -458,7 +461,7 @@ def InitCommandsOrMappings() #{{{2
             # I don't know whether it would be still too costly.
             #}}}
             location: matchstr(v, 'Last set from .* line \d\+$'),
-            }})
+            }))
 
     if sourcetype == 'Commands'
         # Remove heading:{{{
@@ -470,13 +473,13 @@ def InitCommandsOrMappings() #{{{2
 
     # align all the names of commands/mappings in a field (max 35 cells)
     var longest_name = mapnew(source,
-            {_, v -> v.text->matchstr('^\S*')->strchars(true)})
+            (_, v) => v.text->matchstr('^\S*')->strchars(true))
         ->max()
     longest_name = min([35, longest_name])
-    source->map({_, v -> extend(v, {
+    source->map((_, v) => extend(v, {
         text: matchstr(v.text, '^\S*')->printf('%-' .. longest_name .. 'S')
             .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
-        })})
+        }))
 enddef
 
 def InitFiles() #{{{2
@@ -579,7 +582,7 @@ def InitHelpTags() #{{{2
     #        ^--------------------------^
     #}}}
     var shellpipeline = 'grep -H ".*" '
-        .. map(tagfiles, {_, v -> shellescape(v)})
+        .. map(tagfiles, (_, v) => shellescape(v))
             ->sort()
             ->uniq()
             ->join()
@@ -601,13 +604,13 @@ enddef
 
 def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
-        + copy(v:oldfiles)->filter({_, v -> ExpandTilde(v)->filereadable()})
-    map(recentfiles, {_, v -> fnamemodify(v, ':p')})
+        + copy(v:oldfiles)->filter((_, v) => ExpandTilde(v)->filereadable())
+    map(recentfiles, (_, v) => fnamemodify(v, ':p'))
     var curbuf = expand('%:p')
     source = recentfiles
-        ->filter({_, v -> v != '' && v != curbuf && !isdirectory(v)})
+        ->filter((_, v) => v != '' && v != curbuf && !isdirectory(v))
         ->Uniq()
-        ->map({_, v -> {text: fnamemodify(v, ':~:.'), trailing: '', location: ''}})
+        ->map((_, v) => ({text: fnamemodify(v, ':~:.'), trailing: '', location: ''}))
 enddef
 
 def Job_start(cmd: string) #{{{2
@@ -653,12 +656,12 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
             # That shouldn't  be too costly  now that we  limit the size  of the
             # popup buffer to 1000 lines.
             #}}}
-            ->map({_, v -> {text: v, trailing: '', location: ''}})
+            ->map((_, v) => ({text: v, trailing: '', location: ''}))
             ->AppendSource()
     else
         eval splitted_data
-            ->map({_, v -> split(v, '\t')})
-            ->map({_, v -> {text: v[0], trailing: v[1], location: ''}})
+            ->map((_, v) => split(v, '\t'))
+            ->map((_, v) => ({text: v[0], trailing: v[1], location: ''}))
             ->AppendSource()
     endif
 enddef
@@ -716,7 +719,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
     # erase only one character from the filter text
     elseif key == "\<bs>" || key == "\<c-h>"
         if len(filter_text) >= 1
-            filter_text = filter_text[:-2]
+            filter_text = filter_text[: -2]
             UpdatePopups()
         endif
         return true
@@ -740,7 +743,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         moving_in_popup = true
         timer_stop(moving_in_popup_timer)
         moving_in_popup_timer = timer_start(UPDATEPREVIEW_WAITINGTIME,
-            {-> execute('moving_in_popup = false')})
+            () => execute('moving_in_popup = false'))
 
         var cmd = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
         win_execute(id, cmd)
@@ -918,7 +921,7 @@ def UpdateMainText() #{{{2
       # the next time the source is updated
       && !source_is_being_computed
         timer_stop(popups_update_timer)
-        popups_update_timer = timer_start(0, {-> UpdatePopups()})
+        popups_update_timer = timer_start(0, () => UpdatePopups())
     endif
 
     # Rationale:{{{
@@ -950,19 +953,19 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
         filtered_source += matches
 
         return matches
-            ->map({i, v -> {
+            ->map((i, v) => ({
                 text: v.text .. "\t" .. v.trailing,
-                props: map(pos[i], {_, w -> {col: w + 1, length: 1, type: 'fuzzyMatch'}})
+                props: map(pos[i], (_, w) => ({col: w + 1, length: 1, type: 'fuzzyMatch'}))
                     + [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
                 location: v.location,
-                }})
+                }))
     else
         # need `mapnew()` instead of `map()` to not mutate `source` (or a slice of it)
-        return mapnew(lines, {_, v -> {
+        return mapnew(lines, (_, v) => ({
                 text: v.text .. "\t" .. v.trailing,
                 props: [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
                 location: v.location,
-                }})
+                }))
     endif
 enddef
 
@@ -970,15 +973,15 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     var lastline = line('$', menu_winid)
 
     # append text
-    eval mapnew(text, {_, v -> v.text})
+    eval mapnew(text, (_, v) => v.text)
         ->appendbufline(menu_buf, '$')
 
     # apply text properties
     # Can't use a nested `map()` because nested closures don't always work.{{{
     #
     #     eval text
-    #         ->map({i, v -> v.props->map({_, w -> call('prop_add',
-    #             [lastline + i + 1, w.col] + [extend(w, {bufnr: menu_buf})])})})
+    #         ->map((i, v) => v.props->map({_, w -> call('prop_add',
+    #             [lastline + i + 1, w.col] + [extend(w, {bufnr: menu_buf})])}))
     #
     # Here, `lastline` would always be – wrongly – evaluated to `1`.
     #
@@ -991,8 +994,8 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     var i = 0
     for d in text
         eval d.props
-            ->map({_, v -> call('prop_add',
-                [lastline + i + 1, v.col] + [extend(v, {bufnr: menu_buf})])})
+            ->map((_, v) => call('prop_add',
+                [lastline + i + 1, v.col] + [extend(v, {bufnr: menu_buf})]))
         i += 1
     endfor
 enddef
@@ -1081,7 +1084,7 @@ def UpdatePreview(timerid = 0) #{{{2
         if len(matchlist) < 3
             return
         endif
-        [filename, lnum] = matchlist[1:2]
+        [filename, lnum] = matchlist[1 : 2]
         filename = ExpandTilde(filename)
     endif
 
@@ -1251,7 +1254,7 @@ def ExitCallback(type: string, id: number, result: any) #{{{2
             endif
             var filename: string
             var lnum: string
-            [filename, lnum] = matchlist[1:2]
+            [filename, lnum] = matchlist[1 : 2]
             Open(filename, howtoopen)
             exe 'norm! ' .. lnum .. 'G'
         endif
@@ -1376,13 +1379,13 @@ def BuflistedSorted(): list<string> #{{{2
     # was active, but on the last time it was changed.
     #}}}
     return getbufinfo({buflisted: true})
-        ->filter({_, v -> getbufvar(v.bufnr, '&buftype', '') == ''})
-        ->map({_, v -> {bufnr: v.bufnr, lastused: v.lastused}})
+        ->filter((_, v) => getbufvar(v.bufnr, '&buftype', '') == '')
+        ->map((_, v) => ({bufnr: v.bufnr, lastused: v.lastused}))
         # the most recently active buffers first;
         # for 2 buffers accessed in the same second, the one with the bigger number first
         # (because it's the most recently created one)
-        ->sort({i, j -> i.lastused < j.lastused ? 1 : i.lastused == j.lastused ? j.bufnr - i.bufnr : -1})
-        ->map({_, v -> bufname(v.bufnr)})
+        ->sort((i, j) => i.lastused < j.lastused ? 1 : i.lastused == j.lastused ? j.bufnr - i.bufnr : -1)
+        ->map((_, v) => bufname(v.bufnr))
 enddef
 
 def Uniq(list: list<string>): list<string> #{{{2
@@ -1404,15 +1407,15 @@ def GetFindCmd(): string #{{{2
     # ignore files whose name is present in `'wildignore'` (e.g. `tags`)
     var by_name = tokens
         ->copy()
-        ->filter({_, v -> v !~ '[/*]'})
-        ->map({_, v -> '-iname ' .. shellescape(v) .. ' -o'})
+        ->filter((_, v) => v !~ '[/*]')
+        ->map((_, v) => '-iname ' .. shellescape(v) .. ' -o')
         ->join()
 
     # ignore files whose extension is present in `'wildignore'` (e.g. `*.mp3`)
     var by_extension = tokens
         ->copy()
-        ->filter({_, v -> v =~ '\*' && v !~ '/'})
-        ->map({_, v -> '-iname ' .. shellescape(v) .. ' -o'})
+        ->filter((_, v) => v =~ '\*' && v !~ '/')
+        ->map((_, v) => '-iname ' .. shellescape(v) .. ' -o')
         ->join()
 
     # ignore files whose directory is present in `'wildignore'` (e.g. `*/build/*`)
@@ -1426,8 +1429,8 @@ def GetFindCmd(): string #{{{2
     var cwd = getcwd()
     var by_directory = tokens
         ->copy()
-        ->filter({_, v -> v =~ '/'})
-        ->map({_, v -> '-ipath '
+        ->filter((_, v) => v =~ '/')
+        ->map((_, v) => '-ipath '
             # Why replacing the current working directory with a dot?{{{
             #
             #     $ mkdir -p /tmp/test \
@@ -1454,7 +1457,7 @@ def GetFindCmd(): string #{{{2
             #     ./file3~
             #}}}
             .. substitute(v, '^\V' .. cwd->escape('\') .. '/', './', '')->shellescape()
-            .. ' -prune -o'})
+            .. ' -prune -o')
         ->join()
 
     var hidden_files = '-path ''*/.*'' -prune'
@@ -1494,7 +1497,7 @@ def FormatBigNumber(str: string): string #{{{2
     #     def FormatBigNumber(str: string): string
     #         return split(str, '\zs')
     #             ->reverse()
-    #             ->reduce({a, v -> substitute(a, ',', '', 'g')->len() % 3 == 2 ? ',' .. v .. a : v .. a})
+    #             ->reduce((a, v) => substitute(a, ',', '', 'g')->len() % 3 == 2 ? ',' .. v .. a : v .. a)
     #             ->trim(',', 0)
     #     enddef
     #
@@ -1503,9 +1506,9 @@ def FormatBigNumber(str: string): string #{{{2
     if len(str) <= 3
         return str
     elseif len(str) % 3 == 1
-        return str[0] .. ',' .. FormatBigNumber(str[1:])
+        return str[0] .. ',' .. FormatBigNumber(str[1 :])
     else
-        return str[0] .. FormatBigNumber(str[1:])
+        return str[0] .. FormatBigNumber(str[1 :])
     endif
 enddef
 
