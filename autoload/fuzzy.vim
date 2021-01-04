@@ -266,7 +266,31 @@ const PREVIEW_MAXSIZE = 5 * pow(2, 20)
 # being  processed;  in  effect,  this  should give  us  the  *impression*  that
 # `matchfuzzypos()` is run asynchronously.
 #}}}
-const SOURCECHUNKSIZE = 10000
+
+# FIXME: If we reduce this constant to 10000, we can't find some help tags, like `two-engines`.{{{
+#
+# It seems we need this constant to  be bigger than the source; which breaks the
+# chunking.
+#
+# The issue disappears if we replace this line (in `UpdateMainText()`):
+#
+#     last_filtered_line + SOURCECHUNKSIZE,
+#
+# With this one:
+#
+#     last_filtered_line + SOURCECHUNKSIZE + 5000,
+#                                          ^----^
+#
+# It also disappears if we replace this line (which is just a little later):
+#
+#     var lines = source[last_filtered_line + 1 : new_last_filtered_line]
+#
+# With this one:
+#
+#     var lines = source[last_filtered_line + 1 : new_last_filtered_line + 5000]
+#                                                                        ^----^
+#}}}
+const SOURCECHUNKSIZE = 15000
 
 # Init {{{1
 
@@ -315,8 +339,8 @@ def fuzzy#main(type: string) #{{{2
     endif
 
     var height = &lines / 3
-    var statusline = &ls == 2 || &ls == 1 && winnr('$') >= 2 ? 1 : 0
-    var tabline = &stal == 2 || &stal == 1 && tabpagenr('$') >= 2 ? 1 : 0
+    var statusline = (&ls == 2 || &ls == 1 && winnr('$') >= 2) ? 1 : 0
+    var tabline = (&stal == 2 || &stal == 1 && tabpagenr('$') >= 2) ? 1 : 0
     def Offset(): number
         var offset = 0
         var necessary = 2 * height + BORDERS
@@ -747,7 +771,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
 
         var cmd = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
         win_execute(id, cmd)
-        UpdatePopups(true)
+        UpdatePopups(false)
         return true
 
     # select first or last line
@@ -757,7 +781,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         else
             win_execute(menu_winid, 'norm! 1G')
         endif
-        UpdatePopups(true)
+        UpdatePopups(false)
         return true
 
     # allow for the preview to be scrolled
@@ -800,7 +824,7 @@ def MaybeUpdatePopups() #{{{2
 
     # if enough lines have been accumulated
     if current_source_length - last_filtered_line >= SOURCECHUNKSIZE
-      # or if there are still some lines to process and the source has not changed since last time
+      # or if there are still some lines to process and the source has changed since last time
       || last_filtered_line < current_source_length - 1
       && last_source_length != current_source_length
         UpdatePopups()
@@ -815,8 +839,8 @@ var last_source_length = -1
 var new_last_filtered_line = -1
 var popups_update_timer = -1
 
-def UpdatePopups(notTheMainText = false) #{{{2
-    if !notTheMainText
+def UpdatePopups(main_text = true) #{{{2
+    if main_text
         try
             UpdateMainText()
         catch
@@ -947,7 +971,8 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
     if filter_text =~ '\S'
         var matches: list<dict<string>>
         var pos: list<list<number>>
-        [matches, pos] = matchfuzzypos(lines, filter_text, {key: 'text'})
+        var scores: list<number>
+        [matches, pos, scores] = matchfuzzypos(lines, filter_text, {key: 'text'})
         # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
         # works as expected later (i.e. can determine which entry we've chosen).
         filtered_source += matches
