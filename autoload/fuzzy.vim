@@ -1,4 +1,4 @@
-vim9script noclear
+vim9 noclear
 
 if exists('loaded') | finish | endif
 var loaded = true
@@ -267,7 +267,7 @@ const PREVIEW_MAXSIZE = 5 * pow(2, 20)
 # `matchfuzzypos()` is run asynchronously.
 #}}}
 
-# FIXME: If we reduce this constant to 10000, we can't find some help tags, like `two-engines`.{{{
+# FIXME: If we reduce this constant to 10'000, we can't find some help tags, like `two-engines`.{{{
 #
 # It seems we need this constant to  be bigger than the source; which breaks the
 # chunking.
@@ -290,7 +290,7 @@ const PREVIEW_MAXSIZE = 5 * pow(2, 20)
 #     var lines = source[last_filtered_line + 1 : new_last_filtered_line + 5000]
 #                                                                        ^----^
 #}}}
-const SOURCECHUNKSIZE = 15000
+const SOURCECHUNKSIZE = 15'000
 
 # Init {{{1
 
@@ -1005,8 +1005,8 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     # Can't use a nested `map()` because nested closures don't always work.{{{
     #
     #     eval text
-    #         ->map((i, v) => v.props->map({_, w -> call('prop_add',
-    #             [lastline + i + 1, w.col] + [extend(w, {bufnr: menu_buf})])}))
+    #         ->map((i, v) => v.props->map((_, w) => call('prop_add',
+    #             [lastline + i + 1, w.col] + [extend(w, {bufnr: menu_buf})])))
     #
     # Here, `lastline` would always be – wrongly – evaluated to `1`.
     #
@@ -1175,7 +1175,7 @@ def UpdatePreview(timerid = 0) #{{{2
         var setsyntax = 'syn clear | sil! do filetypedetect BufReadPost ' .. fnameescape(filename)
         var fullconceal = '&l:cole = 3'
         var unfold = 'norm! zR'
-        var whereAmI = sourcetype == 'Commands' || sourcetype =~ '^Mappings' ? '&l:cul = 1' : ''
+        var whereAmI = sourcetype == 'Commands' || sourcetype =~ '^Mappings' ? '&l:cul = true' : ''
         win_execute(preview_winid, [setsyntax, fullconceal, unfold, whereAmI])
     enddef
 
