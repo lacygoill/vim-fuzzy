@@ -447,7 +447,7 @@ def InitCommandsOrMappings() #{{{2
         #}}}
         noise = '^\S*\zs.*\ze\%43c.*'
     elseif sourcetype =~ '^Mappings'
-        cmd = 'verb ' .. sourcetype[-2 : -2]->tolower() .. 'map'
+        cmd = 'verb ' .. sourcetype[-2]->tolower() .. 'map'
         # The first 3 characters are used for the mode.{{{
         #
         #     nox<key> ...
