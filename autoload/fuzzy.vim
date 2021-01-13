@@ -468,7 +468,7 @@ def InitCommandsOrMappings() #{{{2
         # split after every "Last set from ..." line
         ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
         # transforms each pair of lines into a dictionary
-        ->map((_, v) => ({
+        ->mapnew((_, v) => ({
             text: matchstr(v, relevant)->substitute(noise, '', ''),
             # `matchstr()` extracts the filename.{{{
             #
@@ -634,7 +634,7 @@ def InitRecentFiles() #{{{2
     source = recentfiles
         ->filter((_, v) => v != '' && v != curbuf && !isdirectory(v))
         ->Uniq()
-        ->map((_, v) => ({text: fnamemodify(v, ':~:.'), trailing: '', location: ''}))
+        ->mapnew((_, v) => ({text: fnamemodify(v, ':~:.'), trailing: '', location: ''}))
 enddef
 
 def Job_start(cmd: string) #{{{2
@@ -680,12 +680,12 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
             # That shouldn't  be too costly  now that we  limit the size  of the
             # popup buffer to 1000 lines.
             #}}}
-            ->map((_, v) => ({text: v, trailing: '', location: ''}))
+            ->mapnew((_, v) => ({text: v, trailing: '', location: ''}))
             ->AppendSource()
     else
         eval splitted_data
-            ->map((_, v) => split(v, '\t'))
-            ->map((_, v) => ({text: v[0], trailing: v[1], location: ''}))
+            ->mapnew((_, v) => split(v, '\t'))
+            ->mapnew((_, v) => ({text: v[0], trailing: v[1], location: ''}))
             ->AppendSource()
     endif
 enddef
@@ -978,9 +978,9 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
         filtered_source += matches
 
         return matches
-            ->map((i, v) => ({
+            ->mapnew((i, v) => ({
                 text: v.text .. "\t" .. v.trailing,
-                props: map(pos[i], (_, w) => ({col: w + 1, length: 1, type: 'fuzzyMatch'}))
+                props: mapnew(pos[i], (_, w) => ({col: w + 1, length: 1, type: 'fuzzyMatch'}))
                     + [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
                 location: v.location,
                 }))
@@ -1410,7 +1410,7 @@ def BuflistedSorted(): list<string> #{{{2
         # for 2 buffers accessed in the same second, the one with the bigger number first
         # (because it's the most recently created one)
         ->sort((i, j) => i.lastused < j.lastused ? 1 : i.lastused == j.lastused ? j.bufnr - i.bufnr : -1)
-        ->map((_, v) => bufname(v.bufnr))
+        ->mapnew((_, v) => bufname(v.bufnr))
 enddef
 
 def Uniq(list: list<string>): list<string> #{{{2
