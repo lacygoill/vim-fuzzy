@@ -218,9 +218,9 @@ var loaded = true
 
 # Config {{{1
 
-const TEXTWIDTH = 80
+const TEXTWIDTH: number = 80
 # 2 popups = 4 borders
-const BORDERS = 4
+const BORDERS: number = 4
 # There is no need to display *all* the filtered lines in the popup.{{{
 #
 # Suppose 10000 lines match your filter text; are you really going to select the
@@ -245,10 +245,10 @@ const BORDERS = 4
 # There's not much we  can do to optimize that, except for  limiting the size of
 # the popup menu.
 #}}}
-const POPUP_MAXLINES = 1000
+const POPUP_MAXLINES: number = 1'000
 
-const UPDATEPREVIEW_WAITINGTIME = 50
-const PREVIEW_MAXSIZE = 5 * pow(2, 20)
+const UPDATEPREVIEW_WAITINGTIME: number = 50
+const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
 
 # Maximum number of lines we're ok for `matchfuzzypos()` to process.{{{
 #
@@ -281,28 +281,32 @@ const PREVIEW_MAXSIZE = 5 * pow(2, 20)
 #     last_filtered_line + SOURCECHUNKSIZE + 5000,
 #                                          ^----^
 #
-# It also disappears if we replace this line (which is just a little later):
+# It also disappears if we replace this code (which is just a little later):
 #
-#     var lines = source[last_filtered_line + 1 : new_last_filtered_line]
+#     var lines: list<dict<string>> = source[
+#         last_filtered_line + 1 : new_last_filtered_line
+#         ]
 #
 # With this one:
 #
-#     var lines = source[last_filtered_line + 1 : new_last_filtered_line + 5000]
-#                                                                        ^----^
+#     var lines: list<dict<string>> = source[
+#         last_filtered_line + 1 : new_last_filtered_line + 5000
+#                                                         ^----^
+#         ]
 #}}}
-const SOURCECHUNKSIZE = 15'000
+const SOURCECHUNKSIZE: number = 15'000
 
 # Init {{{1
 
 import Profile from 'lg.vim'
 
-var filter_text = ''
+var filter_text: string = ''
 var filtered_source: list<dict<string>>
-var menu_buf = -1
-var menu_winid = -1
-var preview_winid = -1
+var menu_buf: number = -1
+var menu_winid: number = -1
+var preview_winid: number = -1
 var source: list<dict<string>>
-var source_is_being_computed = false
+var source_is_being_computed: bool = false
 var sourcetype: string
 
 # Interface {{{1
@@ -338,13 +342,13 @@ def fuzzy#main(type: string) #{{{2
         return
     endif
 
-    var height = &lines / 3
-    var statusline = (&ls == 2 || &ls == 1 && winnr('$') >= 2) ? 1 : 0
-    var tabline = (&stal == 2 || &stal == 1 && tabpagenr('$') >= 2) ? 1 : 0
+    var height: number = &lines / 3
+    var statusline: number = (&ls == 2 || &ls == 1 && winnr('$') >= 2) ? 1 : 0
+    var tabline: number = (&stal == 2 || &stal == 1 && tabpagenr('$') >= 2) ? 1 : 0
     def Offset(): number
-        var offset = 0
-        var necessary = 2 * height + BORDERS
-        var available = &lines - &ch - statusline - tabline
+        var offset: number = 0
+        var necessary: number = 2 * height + BORDERS
+        var available: number = &lines - &ch - statusline - tabline
         if necessary > available
             offset = (necessary - available) / 2
             if (necessary - available) % 2 == 1
@@ -361,10 +365,10 @@ def fuzzy#main(type: string) #{{{2
         return
     endif
 
-    var width = min([TEXTWIDTH, &columns - BORDERS])
-    var line = &lines - &ch - statusline - height - 1
+    var width: number = min([TEXTWIDTH, &columns - BORDERS])
+    var line: number = &lines - &ch - statusline - height - 1
 
-    var opts = {
+    var opts: dict<any> = {
         line: line,
         col: (&columns - TEXTWIDTH - BORDERS) / 2,
         pos: 'topleft',
@@ -496,7 +500,7 @@ def InitCommandsOrMappings() #{{{2
     endif
 
     # align all the names of commands/mappings in a field (max 35 cells)
-    var longest_name = mapnew(source,
+    var longest_name: number = mapnew(source,
             (_, v) => v.text->matchstr('^\S*')->strchars(true))
         ->max()
     longest_name = min([35, longest_name])
@@ -522,12 +526,12 @@ def InitFiles() #{{{2
     # with a command which has a fast output;  i.e. they need to drop *a lot* of
     # lines when displaying the output.
     #}}}
-    var findcmd = GetFindCmd()
+    var findcmd: string = GetFindCmd()
     Job_start(findcmd)
 enddef
 
 def InitHelpTags() #{{{2
-    var tagfiles = globpath(&rtp, 'doc/tags', true, true)
+    var tagfiles: list<string> = globpath(&rtp, 'doc/tags', true, true)
 
     # What's the purpose of this formatting command?{{{
     #
@@ -588,7 +592,7 @@ def InitHelpTags() #{{{2
         #}}}
         formatting_cmd = 'perl -n -e ''/.*?:(.*?)\t(.*?)\t/; printf(qq/%-40s\t%s\n/, $1, $2)'''
     else
-        var awkpgm =<< trim END
+        var awkpgm: list<string> =<< trim END
             {
                 match($0, "[^:]*:([^\t]*)\t([^\t]*)\t", a);
                 printf("%-40s\t%s\n", a[1], a[2]);
@@ -605,7 +609,7 @@ def InitHelpTags() #{{{2
     #     rg --no-line-number --no-column '.*' ...
     #        ^--------------------------^
     #}}}
-    var shellpipeline = 'grep -H ".*" '
+    var shellpipeline: string = 'grep -H ".*" '
         .. map(tagfiles, (_, v) => shellescape(v))
             ->sort()
             ->uniq()
@@ -630,7 +634,7 @@ def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
         + copy(v:oldfiles)->filter((_, v) => ExpandTilde(v)->filereadable())
     map(recentfiles, (_, v) => fnamemodify(v, ':p'))
-    var curbuf = expand('%:p')
+    var curbuf: string = expand('%:p')
     source = recentfiles
         ->filter((_, v) => v != '' && v != curbuf && !isdirectory(v))
         ->Uniq()
@@ -656,7 +660,7 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
     else
         data = argdata
     endif
-    var splitted_data = split(data, '\n\ze.')
+    var splitted_data: list<string> = split(data, '\n\ze.')
     # The last line of `argdata` does not necessarily match a full shell output line.
     # Most of the time, it's incomplete.
     incomplete = remove(splitted_data, -1)
@@ -690,7 +694,7 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
     endif
 enddef
 
-var incomplete = ''
+var incomplete: string = ''
 
 def SetFinalSource(...l: any) #{{{2
     # Wait for all callbacks to have been processed.{{{
@@ -708,7 +712,7 @@ def SetFinalSource(...l: any) #{{{2
     if sourcetype == 'Files' || sourcetype == 'Locate'
         [{text: trim(incomplete, "\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
     else
-        var parts = split(incomplete, '\t')
+        var parts: list<string> = split(incomplete, '\t')
         [{text: parts[0], trailing: parts[1]->trim("\<c-j>", 2), location: ''}]->AppendSource()
         #                                          ^------^
         #             the last line of the shell ouput ends
@@ -750,8 +754,8 @@ def PopupFilter(id: number, key: string): bool #{{{2
 
     # select a neighboring line
     elseif index(["\<down>", "\<up>", "\<c-n>", "\<c-p>"], key) >= 0
-        var curline = line('.', id)
-        var lastline = line('$', id)
+        var curline: number = line('.', id)
+        var lastline: number = line('$', id)
         # No need to update the popup if we try to move beyond the first/last line.{{{
         #
         # Besides, if  you let Vim  update the popup  in those cases,  it causes
@@ -769,7 +773,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         moving_in_popup_timer = timer_start(UPDATEPREVIEW_WAITINGTIME,
             () => execute('moving_in_popup = false'))
 
-        var cmd = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
+        var cmd: string = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
         win_execute(id, cmd)
         UpdatePopups(false)
         return true
@@ -817,10 +821,10 @@ def PopupFilter(id: number, key: string): bool #{{{2
 enddef
 
 var moving_in_popup: bool
-var moving_in_popup_timer = -1
+var moving_in_popup_timer: number = -1
 
 def MaybeUpdatePopups() #{{{2
-    var current_source_length = len(source)
+    var current_source_length: number = len(source)
 
     # if enough lines have been accumulated
     if current_source_length - last_filtered_line >= SOURCECHUNKSIZE
@@ -833,11 +837,11 @@ def MaybeUpdatePopups() #{{{2
     last_source_length = current_source_length
 enddef
 
-var last_filter_text = ''
-var last_filtered_line = -1
-var last_source_length = -1
-var new_last_filtered_line = -1
-var popups_update_timer = -1
+var last_filter_text: string = ''
+var last_filtered_line: number = -1
+var last_source_length: number = -1
+var new_last_filtered_line: number = -1
+var popups_update_timer: number = -1
 
 def UpdatePopups(main_text = true) #{{{2
     if main_text
@@ -865,11 +869,11 @@ def UpdatePopups(main_text = true) #{{{2
 
     # no need to update the preview while we're moving in the popup with `C-n` and `C-p`
     timer_stop(preview_timer)
-    var time = moving_in_popup ? UPDATEPREVIEW_WAITINGTIME : 0
+    var time: number = moving_in_popup ? UPDATEPREVIEW_WAITINGTIME : 0
     preview_timer = timer_start(time, UpdatePreview)
 enddef
 
-var preview_timer = -1
+var preview_timer: number = -1
 
 def UpdateMainText() #{{{2
 # update the popup with the new list of lines
@@ -906,7 +910,7 @@ def UpdateMainText() #{{{2
         return
     endif
 
-    var filter_text_has_changed = filter_text != last_filter_text
+    var filter_text_has_changed: bool = filter_text != last_filter_text
     last_filter_text = filter_text
     if filter_text_has_changed
         filtered_source = []
@@ -914,17 +918,19 @@ def UpdateMainText() #{{{2
         popup_settext(menu_winid, '')
     endif
 
-    var current_source_length = len(source)
+    var current_source_length: number = len(source)
     new_last_filtered_line = min([
         last_filtered_line + SOURCECHUNKSIZE,
         current_source_length - 1
         ])
-    var lines = source[last_filtered_line + 1 : new_last_filtered_line]
-    var highlighted_lines = FilterAndHighlight(lines)
+    var lines: list<dict<string>> = source[
+        last_filtered_line + 1 : new_last_filtered_line
+        ]
+    var highlighted_lines: list<dict<any>> = FilterAndHighlight(lines)
     if MenuIsEmpty()
         popup_settext(menu_winid, highlighted_lines[: POPUP_MAXLINES - 1])
     else
-        var lastline = line('$', menu_winid)
+        var lastline: number = line('$', menu_winid)
         if lastline < POPUP_MAXLINES
             Popup_appendtext(highlighted_lines[: POPUP_MAXLINES - lastline - 1])
         else
@@ -995,7 +1001,7 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
 enddef
 
 def Popup_appendtext(text: list<dict<any>>) #{{{2
-    var lastline = line('$', menu_winid)
+    var lastline: number = line('$', menu_winid)
 
     # append text
     eval mapnew(text, (_, v) => v.text)
@@ -1016,10 +1022,10 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     #    - it makes the code a little more readable
     #    - it might be faster
     #}}}
-    var i = 0
+    var i: number = 0
     for d in text
         eval d.props
-            ->map((_, v) => call('prop_add',
+            ->mapnew((_, v) => call('prop_add',
                 [lastline + i + 1, v.col] + [extend(v, {bufnr: menu_buf})]))
         i += 1
     endfor
@@ -1035,7 +1041,7 @@ def UpdateMainTitle() #{{{2
         # `12/34` with `0/0`; this way, we can  be sure that any space used as a
         # padding is preserved.
         #}}}
-        var newtitle = popup_getoptions(menu_winid)
+        var newtitle: string = popup_getoptions(menu_winid)
             ->get('title', '')
             # Why do you replace the total?  It seems useless.{{{
             #
@@ -1055,9 +1061,9 @@ def UpdateMainTitle() #{{{2
         return
     endif
 
-    var curline = line('.', menu_winid)
-    var lastline = line('$', menu_winid)
-    var newtitle = popup_getoptions(menu_winid)
+    var curline: number = line('.', menu_winid)
+    var lastline: number = line('$', menu_winid)
+    var newtitle: string = popup_getoptions(menu_winid)
         ->get('title', '')
         ->substitute('\d\+', curline, '')
         ->substitute('/\zs>\=\d\+', (len(filtered_source ?? source) > POPUP_MAXLINES ? '>' : '') .. lastline, '')
@@ -1066,7 +1072,7 @@ def UpdateMainTitle() #{{{2
 enddef
 
 def UpdatePreview(timerid = 0) #{{{2
-    var line = getbufline(menu_buf, line('.', menu_winid))
+    var line: list<string> = getbufline(menu_buf, line('.', menu_winid))
 
     # clear the preview if nothing matches the filtering pattern
     if line == ['']
@@ -1074,11 +1080,11 @@ def UpdatePreview(timerid = 0) #{{{2
         return
     endif
 
-    var splitted = line
+    var splitted: list<string> = line
         ->get(0, '')
         ->split('\t\+')
-    var left = ''
-    var right = ''
+    var left: string = ''
+    var right: string = ''
     if len(splitted) == 2
         [left, right] = splitted
     elseif len(splitted) == 1
@@ -1102,7 +1108,7 @@ def UpdatePreview(timerid = 0) #{{{2
     elseif index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
         filename = ExpandTilde(left)->fnamemodify(':p')
     elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
-        var matchlist = (filtered_source ?? source)
+        var matchlist: list<string> = (filtered_source ?? source)
             ->get(line('.', menu_winid) - 1, {})
             ->get('location', '')
             ->matchlist('Last set from \(.*\) line \(\d\+\)$')
@@ -1116,7 +1122,7 @@ def UpdatePreview(timerid = 0) #{{{2
     popup_setoptions(preview_winid, {title: ''})
     if !filereadable(filename)
         win_execute(preview_winid, 'syn clear')
-        var text = {
+        var text: string = {
             file: 'File not readable',
             dir: 'Directory',
             link: 'Symbolic link',
@@ -1145,7 +1151,7 @@ def UpdatePreview(timerid = 0) #{{{2
         return
     endif
 
-    var text = readfile(filename)
+    var text: list<string> = readfile(filename)
     popup_settext(preview_winid, text)
 
     def Prettify()
@@ -1172,22 +1178,23 @@ def UpdatePreview(timerid = 0) #{{{2
         # Those are  weird errors.  But the  point is that no  matter the error,
         # we're not interested in reading its message now.
         #}}}
-        var setsyntax = 'syn clear | sil! do filetypedetect BufReadPost ' .. fnameescape(filename)
-        var fullconceal = '&l:cole = 3'
-        var unfold = 'norm! zR'
-        var whereAmI = sourcetype == 'Commands' || sourcetype =~ '^Mappings' ? '&l:cul = true' : ''
+        var setsyntax: string = 'syn clear | sil! do filetypedetect BufReadPost '
+            .. fnameescape(filename)
+        var fullconceal: string = '&l:cole = 3'
+        var unfold: string = 'norm! zR'
+        var whereAmI: string = sourcetype == 'Commands' || sourcetype =~ '^Mappings' ? '&l:cul = true' : ''
         win_execute(preview_winid, [setsyntax, fullconceal, unfold, whereAmI])
     enddef
 
     # syntax highlight the text
     if sourcetype == 'HelpTags'
-        var setsyntax = [
-            'if get(b:, "current_syntax", "") != "help"',
-            'do Syntax help',
-            'endif'
-            ]
-        var tagname = left->trim()->substitute("'", "''", 'g')->escape('\')
-        var searchcmd = printf("echo search('\\*\\V%s\\m\\*', 'n')", tagname)
+        var setsyntax: list<string> =<< trim END
+            if get(b:, 'current_syntax', '') != 'help'
+            do Syntax help
+            endif
+        END
+        var tagname: string = left->trim()->substitute("'", "''", 'g')->escape('\')
+        var searchcmd: string = printf("echo search('\\*\\V%s\\m\\*', 'n')", tagname)
         # Why not just running `search()`?{{{
         #
         # If you just run `search()`, Vim won't redraw the preview popup.
@@ -1195,7 +1202,7 @@ def UpdatePreview(timerid = 0) #{{{2
         # cursor, and in the statusline, tabline).
         #}}}
         lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>", 2)
-        var showtag = 'norm! ' .. lnum .. 'G'
+        var showtag: string = 'norm! ' .. lnum .. 'G'
         win_execute(preview_winid, setsyntax + ['&l:cole = 3', showtag])
 
     elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
@@ -1213,7 +1220,7 @@ enddef
 
 def ExitCallback(type: string, id: number, result: any) #{{{2
     var idx: any = result
-    var howtoopen = ''
+    var howtoopen: string = ''
     if type(result) == v:t_number && result <= 0
         # If a job  has been started, and  we want to kill it  by pressing `C-c`
         # because  it takes  too much  time, `job_stop()`  must be  invoked here
@@ -1226,7 +1233,7 @@ def ExitCallback(type: string, id: number, result: any) #{{{2
     endif
 
     try
-        var chosen = (filtered_source ?? source)
+        var chosen: string = (filtered_source ?? source)
             ->get(idx - 1, {})
             ->get('text', '')
             ->split('\t')
@@ -1271,7 +1278,7 @@ def ExitCallback(type: string, id: number, result: any) #{{{2
             exe 'h ' .. chosen
 
         elseif type == 'Commands' || type =~ '^Mappings'
-            var matchlist = get(filtered_source ?? source, idx - 1, {})
+            var matchlist: list<string> = get(filtered_source ?? source, idx - 1, {})
                 ->get('location')
                 ->matchlist('Last set from \(.*\) line \(\d\+\)$')
             if len(matchlist) < 3
@@ -1294,8 +1301,8 @@ def ExitCallback(type: string, id: number, result: any) #{{{2
 enddef
 
 def Open(filename: string, how: string)
-    var file = filename->fnameescape()
-    var cmd = get({insplit: 'sp', intab: 'tabe', invertsplit: 'vs'}, how, 'e')
+    var file: string = filename->fnameescape()
+    var cmd: string = get({insplit: 'sp', intab: 'tabe', invertsplit: 'vs'}, how, 'e')
     exe cmd .. ' ' .. file
 enddef
 
@@ -1303,7 +1310,7 @@ def Clean() #{{{2
     # the job  makes certain assumptions  (like the existence of  popups); let's
     # stop it  first, to avoid  any issue if we  break one of  these assumptions
     # later
-    var job_was_running = false
+    var job_was_running: bool = false
     if job_status(myjob) == 'run'
         job_was_running = true
         job_stop(myjob)
@@ -1427,17 +1434,17 @@ enddef
 
 def GetFindCmd(): string #{{{2
     # split before any comma which is not preceded by an odd number of backslashes
-    var tokens = split(&wig, '\%(\\\@<!\\\%(\\\\\)*\\\@!\)\@<!,')
+    var tokens: list<string> = split(&wig, '\%(\\\@<!\\\%(\\\\\)*\\\@!\)\@<!,')
 
     # ignore files whose name is present in `'wildignore'` (e.g. `tags`)
-    var by_name = tokens
+    var by_name: string = tokens
         ->copy()
         ->filter((_, v) => v !~ '[/*]')
         ->map((_, v) => '-iname ' .. shellescape(v) .. ' -o')
         ->join()
 
     # ignore files whose extension is present in `'wildignore'` (e.g. `*.mp3`)
-    var by_extension = tokens
+    var by_extension: string = tokens
         ->copy()
         ->filter((_, v) => v =~ '\*' && v !~ '/')
         ->map((_, v) => '-iname ' .. shellescape(v) .. ' -o')
@@ -1451,8 +1458,8 @@ def GetFindCmd(): string #{{{2
     # does not match,  `-prune` returns false, and the rhs  *is* evaluated.  See
     # `man find /^EXAMPLES/;/construct`.
     #}}}
-    var cwd = getcwd()
-    var by_directory = tokens
+    var cwd: string = getcwd()
+    var by_directory: string = tokens
         ->copy()
         ->filter((_, v) => v =~ '/')
         ->map((_, v) => '-ipath '
@@ -1485,7 +1492,7 @@ def GetFindCmd(): string #{{{2
             .. ' -prune -o')
         ->join()
 
-    var hidden_files = '-path ''*/.*'' -prune'
+    var hidden_files: string = '-path ''*/.*'' -prune'
     return printf('find . %s %s %s %s -o -type f -print',
         by_name, by_extension, by_directory, hidden_files)
 enddef
