@@ -47,61 +47,13 @@ var loaded = true
 # use the new feature to get an editable prompt.
 #}}}
 
-# FIXME: Splitting the source in chunks fucks up the sorting.{{{
-#
-#     $ vim
-#     " press:  SPC fl
-#     " wait for the popup to be fully updated
-#     " type:  foobar
-#
-# The  first  line  is  not  that  good  (compared  to  `fzf(1)`,  and  even  to
-# `matchfuzzy()` when you pass it the output of `locate(1)` directly).
-#
-# Fix: After you've obtained `filtered_source`, re-run `matchfuzzypos()` against
-# it so that the most relevant lines come first.
-#
-# ---
-#
-# Issue:  But what if `filtered_source` is still huge?
-# We  can't  re-split  it  into   chunks,  because  the  purpose  of  re-running
-# `matchfuzzypos()` is  to fix the  sorting; that  can only be  achieved without
-# splitting.
-#
-# Workaround: Save each processed chunk independently.
-# If `filtered_source` gets too big,  don't re-run `matchfuzzypos()` against it;
-# re-run it against the first 10 lines of each chunk.
-# The rationale  being that beyond 10  lines, the match you're  interested in is
-# probably not there; or if it is, it should be quite easy to get it by refining
-# the filter text.
-# By  keeping   only  the  first  10   lines  of  each  chunk,   we  can  divide
-# `filtered_source`  by 1000  (10000/10).  Now,  suppose that  the maximum  size
-# above which `matchfuzzypos()` is too slow  is `50000`.  To reach it, you would
-# need a `filtered_source` of at least 50 millions lines.  That's absurdly huge.
-# In fact, if you get such a  source, I don't think running `matchfuzzypos()` on
-# `filtered_source`  is the  first issue;  the first  issue is  simply that  the
-# initial processing of the source is probably too long.
-#
-# ---
-#
-# Btw, I  think we  should never append  lines in the  popup.  We  should always
-# reset all  the lines.   Indeed, any time  you've filtered a  new chunk  of the
-# source, you probably need  to re-filter all the lines in the  popup to fix the
-# sorting.
-#
-# ---
-#
-# Would it  help if `matchfuzzypos()` could  give us the scores  of the filtered
-# items as  a separate  list?  Maybe  we could use  this list  to sort  back the
-# filtered chunks.
-#}}}
-
-# TODO: Once  the  previous  issue  is   fixed,  you'll  need  to  implement  an
-# hourglass-like indicator in  the popup's title.  You won't be  able to rely on
-# the  numbers growing  in the  title anymore.   Vim might  be still  processing
-# without any number growing.  Or the numbers could be growing erratically.  For
-# example, right now, if we use  `Locate`, and type `foobarbaz`, right after the
-# `z` is inserted, there is an unusal long  time for the title to go from `1/16`
-# to the final `1/32`.  We need a more predictable indicator.
+# TODO: Implement an hourglass-like  indicator in the popup's  title.  You won't
+# be able  to rely on the  numbers growing in  the title anymore.  Vim  might be
+# still  processing  without  any  number  growing.  Or  the  numbers  could  be
+# growing erratically.   For example, right  now, if  we use `Locate`,  and type
+# `foobarbaz`, right after the `z` is inserted, there is an unusal long time for
+# the title to go  from `1/16` to the final `1/32`.  We  need a more predictable
+# indicator.
 
 # TODO: If we get an absurdly huge source, the plugin should bail out.
 
@@ -245,7 +197,7 @@ const BORDERS: number = 4
 # There's not much we  can do to optimize that, except for  limiting the size of
 # the popup menu.
 #}}}
-const POPUP_MAXLINES: number = 1'000
+const POPUP_MAXLINES: number = 100
 
 const UPDATEPREVIEW_WAITINGTIME: number = 50
 const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
@@ -279,7 +231,7 @@ const SOURCECHUNKSIZE: number = 10'000
 import Profile from 'lg.vim'
 
 var filter_text: string = ''
-var filtered_source: list<dict<string>>
+var filtered_source: list<dict<any>>
 var menu_buf: number = -1
 var menu_winid: number = -1
 var preview_winid: number = -1
@@ -619,6 +571,29 @@ def InitRecentFiles() #{{{2
 enddef
 
 def Job_start(cmd: string) #{{{2
+# TODO: *Sometimes*, after pressing `C-c` while a job is running:{{{
+#
+#    - the job keeps running
+#    - the command-line is not cleared
+#
+# I think that's because we sometimes invoke `UpdatePopups()` with a timer.
+# It's possible that  we kill the popup,  and a timer's callback  still tries to
+# update it afterward.
+#
+# But this  begs the question:  how is  it possible for  the popup to  be closed
+# without the exit callback being invoked?
+#
+# Update: I think I can reproduce the issue even without the timer(s).
+# Find a MWE:
+#
+#    - run this command in a separate tmux pane:
+#
+#         $ watch -n 0.1 pidof find
+#
+#    - start Vim from your $HOME
+#
+#    - press `SPC ff`
+#}}}
     source_is_being_computed = true
     myjob = job_start(['/bin/sh', '-c', cmd], {
         out_cb: SetIntermediateSource,
@@ -857,46 +832,46 @@ var preview_timer: number = -1
 
 def UpdateMainText() #{{{2
 # update the popup with the new list of lines
-
-    # TODO: Why do we need this guard (it looks clumsy)?{{{
-    #
-    # *Sometimes*, after pressing `C-c` while a job is running:
-    #
-    #    - the job keeps running
-    #    - the command-line is not cleared
-    #    - `E964` is raised from `Popup_appendtext()` when we try to apply text properties
-    #
-    # I think that's because we sometimes invoke `UpdatePopups()` with a timer.
-    # It's possible that  we kill the popup, and a  timer's callback still tries
-    # to update it afterward.
-    #
-    # But this begs the question: how is  it possible for the popup to be closed
-    # without the exit callback being invoked?
-    #
-    # Update: I think I can reproduce the issue even without the timer(s).
-    # Find a MWE.
-    #
-    # When you do tests, run this command in a separate tmux pane:
-    #
-    #     $ watch -n 0.1 pidof find
-    #
-    # ---
-    #
-    # Note that the issue can only be reproduced while the source is being computed.
-    # That is, only while a job is running.
-    #}}}
-    if win_gettype(menu_winid) != 'popup'
-        Clean()
-        return
-    endif
-
     var filter_text_has_changed: bool = filter_text != last_filter_text
     last_filter_text = filter_text
     if filter_text_has_changed
         filtered_source = []
         last_filtered_line = -1
         popup_settext(menu_winid, '')
+    # Bail out if the popup is full, and we haven't type anything yet.{{{
+    #
+    # The  only reason  to  let the  function  run further,  is  to find  better
+    # matches.   If we  haven't  typed  anything, there  is  no better  matches,
+    # because we need some filtering text to score them.
+    #
+    # Besides, it makes the initial contents of the popup nicer.
+    # E.g.,  if  we don't  return,  the  initial help  tags  are  not like  what
+    # `:FzHelpTags` used to display; i.e. the user manual tags, in order.
+    #}}}
+    elseif line('$', menu_winid) == POPUP_MAXLINES
+        # But don't bail out, even if we *have* typed some filtering text. {{{
+        #
+        # Splitting the source in chunks fucks up the sorting.
+        # If you bail out,  the displayed matches won't be that  good when there are
+        # more than what the popup can display.
+        # You  can check  this  out by  comparing the  popup's  contents when  using
+        # `locate(1)` and the pattern `foobar`, to this Vim expression:
+        #
+        #     :echo systemlist('locate /')->matchfuzzy('foobar')
+        #
+        # We need to let our code try to find better matches, even when the popup is
+        # full.
+        #}}}
+        && filter_text !~ '\S'
+        return
     endif
+    # FIXME: `'cpo'` is sometimes altered.{{{
+    #
+    # Use `Locate`.
+    # Wait for the job to finish.
+    # Type the filtering text `a`.
+    # Press `C-h` to clear the filtering text.
+    #}}}
 
     var current_source_length: number = len(source)
     new_last_filtered_line = min([
@@ -906,23 +881,13 @@ def UpdateMainText() #{{{2
     var lines: list<dict<string>> = source[
         last_filtered_line + 1 : new_last_filtered_line
         ]
-    var highlighted_lines: list<dict<any>> = FilterAndHighlight(lines)
-    if MenuIsEmpty()
-        popup_settext(menu_winid, highlighted_lines[: POPUP_MAXLINES - 1])
-    else
-        var lastline: number = line('$', menu_winid)
-        if lastline < POPUP_MAXLINES
-            Popup_appendtext(highlighted_lines[: POPUP_MAXLINES - lastline - 1])
-        else
-            # If the popup is full, we no longer need to update it.{{{
-            #
-            # Nor do we need to process the rest of the source.
-            # Besides, returning now might prevent some unexpected flickering in
-            # the popup's title, when the popup is full.
-            #}}}
-            return
-        endif
-    endif
+    var popup_lines: list<dict<any>> = FilterAndHighlight(lines)
+    # Don't try to append lines in the popup.{{{
+    #
+    # We  really want  to reset  the  entire popup  every  time a  new chunk  is
+    # processed, because we need to re-sort all the lines.
+    #}}}
+    popup_settext(menu_winid, popup_lines)
     last_filtered_line = new_last_filtered_line
 
     # if we haven't filtered all lines, start a timer to finish the work later
@@ -955,60 +920,38 @@ enddef
 def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
     # add info to get highlight via text properties
     if filter_text =~ '\S'
-        var matches: list<dict<string>>
+        var matches: list<dict<any>>
         var pos: list<list<number>>
         var scores: list<number>
         [matches, pos, scores] = matchfuzzypos(lines, filter_text, {key: 'text'})
-        # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
-        # works as expected later (i.e. can determine which entry we've chosen).
-        filtered_source += matches
-
-        return matches
+        # No need to process *all* the matches.
+        # The popup can only display a limited amount of them.
+        matches = matches
+            ->slice(0, POPUP_MAXLINES)
             ->mapnew((i, v) => ({
                 text: v.text .. "\t" .. v.trailing,
                 props: mapnew(pos[i], (_, w) => ({col: w + 1, length: 1, type: 'fuzzyMatch'}))
                     + [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
                 location: v.location,
+                score: scores[i]
                 }))
+        # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
+        # works as expected later (i.e. can determine which entry we've chosen).
+        filtered_source += matches
+        filtered_source = filtered_source
+            ->sort((a, b) => a.score == b.score ? 0 : a.score > b.score ? -1 : 1)
+            ->slice(0, POPUP_MAXLINES)
+
+        return filtered_source
     else
-        # need `mapnew()` instead of `map()` to not mutate `source` (or a slice of it)
-        return mapnew(lines, (_, v) => ({
+        return lines
+            ->slice(0, POPUP_MAXLINES)
+            ->mapnew((_, v) => ({
                 text: v.text .. "\t" .. v.trailing,
                 props: [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
                 location: v.location,
                 }))
     endif
-enddef
-
-def Popup_appendtext(text: list<dict<any>>) #{{{2
-    var lastline: number = line('$', menu_winid)
-
-    # append text
-    mapnew(text, (_, v) => v.text)
-        ->appendbufline(menu_buf, '$')
-
-    # apply text properties
-    # Can't use a nested `map()` because nested closures don't always work.{{{
-    #
-    #     eval text
-    #         ->map((i, v) => v.props->map((_, w) => call('prop_add',
-    #             [lastline + i + 1, w.col] + [extend(w, {bufnr: menu_buf})])))
-    #
-    # Here, `lastline` would always be – wrongly – evaluated to `1`.
-    #
-    # This is a known limitation: https://github.com/vim/vim/issues/7150
-    # It could be fixed one day, but I still prefer a `for` loop:
-    #
-    #    - it makes the code a little more readable
-    #    - it might be faster
-    #}}}
-    var i: number = 0
-    for d in text
-        eval d.props
-            ->mapnew((_, v) => call('prop_add',
-                [lastline + i + 1, v.col] + [extend(v, {bufnr: menu_buf})]))
-        i += 1
-    endfor
 enddef
 
 def UpdateMainTitle() #{{{2
@@ -1046,7 +989,19 @@ def UpdateMainTitle() #{{{2
     var newtitle: string = popup_getoptions(menu_winid)
         ->get('title', '')
         ->substitute('\d\+', curline, '')
-        ->substitute('/\zs>\=\d\+', (len(filtered_source ?? source) > POPUP_MAXLINES ? '>' : '') .. lastline, '')
+        ->substitute('/\zs>\=\d\+', (
+                (
+                # In theory, this condition is wrong.{{{
+                #
+                # The filtered source could have reached the limit of the popup,
+                # without going beyond; in which case, we should not add the `>`
+                # symbol.  But in practice, it's good enough.
+                #}}}
+                len(filtered_source) == POPUP_MAXLINES
+                || filter_text !~ '\S' && len(source) > POPUP_MAXLINES
+                ) ? '>' : ''
+            ) .. lastline,
+            '')
         ->substitute('(\zs[,0-9]\+\ze)', len(source)->string()->FormatBigNumber(), '')
     popup_setoptions(menu_winid, {title: newtitle})
 enddef
@@ -1300,24 +1255,19 @@ def Clean() #{{{2
 
     popup_close(preview_winid)
 
-    # TODO: We need this in case we exit the popup while a job is still running.{{{
-    #
-    # Otherwise, some job's callbacks might still  be invoked even after the job
-    # has been stopped.  They might call:
-    #
-    #     UpdatePopups() → UpdateMainText() → Popup_appendtext()
-    #
-    # The latter function assumes that `menu_buf` refers to an existing buffer.
-    #
-    # However, all  of this looks  ugly; the  job's callbacks should  not invoke
-    # `UpdatePopups()`.  At least, they should not do it unconditionally.
-    # We'll refactor how the popup is updated in the future.
-    # When you're done  with this refactoring, check whether we  still need this
-    # `sleep` and this `job_was_running`.
-    # To do a test, enter a directory  with a lot of files (e.g. `$HOME`), press
-    # `SPC ff`, then `ESC`.
-    #}}}
     if job_was_running
+        # TODO: We need this in case we exit the popup while a job is still running.{{{
+        #
+        # Otherwise, this  error might  be given  from `SetIntermediateSource()`
+        # and `SetFinalSource()`:
+        #
+        #     E684: list index out of range: 1
+        #
+        # To do  a test, enter a  directory with a lot  of files (e.g. `$HOME`),
+        # press `SPC ff`, then `ESC`.
+        #
+        # Is there a better way of fixing this issue?
+        #}}}
         sleep 1m
     endif
 
@@ -1396,7 +1346,7 @@ def BuflistedSorted(): list<string> #{{{2
         # the most recently active buffers first;
         # for 2 buffers accessed in the same second, the one with the bigger number first
         # (because it's the most recently created one)
-        ->sort((i, j) => i.lastused < j.lastused ? 1 : i.lastused == j.lastused ? j.bufnr - i.bufnr : -1)
+        ->sort((a, b) => a.lastused < b.lastused ? 1 : a.lastused == b.lastused ? b.bufnr - a.bufnr : -1)
         ->mapnew((_, v) => bufname(v.bufnr))
 enddef
 
@@ -1490,10 +1440,6 @@ def ExpandTilde(path: string): string #{{{2
     # error should be raised.
     #}}}
     return substitute(path, '^\~/', $HOME .. '/', '')
-enddef
-
-def MenuIsEmpty(): bool #{{{2
-    return line('$', menu_winid) == 1 && getbufline(menu_buf, 1) == ['']
 enddef
 
 def FormatBigNumber(str: string): string #{{{2
