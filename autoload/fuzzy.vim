@@ -47,15 +47,12 @@ var loaded = true
 # use the new feature to get an editable prompt.
 #}}}
 
-# TODO: Implement an hourglass-like  indicator in the popup's  title.  You won't
-# be able  to rely on the  numbers growing in  the title anymore.  Vim  might be
-# still  processing  without  any  number  growing.  Or  the  numbers  could  be
-# growing erratically.   For example, right  now, if  we use `Locate`,  and type
-# `foobarbaz`, right after the `z` is inserted, there is an unusal long time for
-# the title to go  from `1/16` to the final `1/32`.  We  need a more predictable
-# indicator.
-
-# TODO: If we get an absurdly huge source, the plugin should bail out.
+# TODO: Implement an hourglass-like  indicator in the popup's  title.  You can't
+# rely  on the  numbers growing  in the  title.  Vim  might be  still processing
+# without any number growing.  Or the numbers could be growing erratically.  For
+# example, right now, if we use  `Locate`, and type `foobarbaz`, right after the
+# `z` is inserted, there is an unusal long  time for the title to go from `1/16`
+# to the final `1/32`.  We need a more predictable indicator.
 
 # TODO: For each mapping, implement the counterpart Ex command.
 # It would be especially useful for huge sources.
@@ -69,13 +66,6 @@ var loaded = true
 #
 # If we supply an  initial pattern to an Ex command, we should  never be able to
 # remove any character from it (be it with `C-u`, `C-h`, `BS`).
-
-# TODO: Sometimes `Locate` is much slower than usual (from 8s to ≈ 45s).
-# And sometimes, `$ locate /` is much slower than usual (from .5s to 4s).
-# What's going on?
-# And btw, why is `Locate` so slow compared to `locate(1)`?
-# I don't think `Files` is that slow compared to `find(1)`.
-# Is it because `Locate` finds much more files?
 
 # TODO: Implement `:Snippets`.
 #
@@ -202,6 +192,9 @@ const POPUP_MAXLINES: number = 100
 const UPDATEPREVIEW_WAITINGTIME: number = 50
 const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
 
+# if we get an absurdly huge source, we should bail out
+const TOO_BIG = 1'000'000
+
 # Maximum number of lines we're ok for `matchfuzzypos()` to process.{{{
 #
 # We don't want `matchfuzzypos()` to process  too many lines at once, because it
@@ -218,13 +211,12 @@ const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
 # being  processed;  in  effect,  this  should give  us  the  *impression*  that
 # `matchfuzzypos()` is run asynchronously.
 #}}}
-
 # Don't reduce this setting too much.{{{
 #
 # The lower it is, the harder it is  to type our filtering text; some typed keys
 # get dropped.  Empirically, it seems that you can go down to 4'000.
 #}}}
-const SOURCECHUNKSIZE: number = 10'000
+const SOURCE_CHUNKSIZE: number = 10'000
 
 # Init {{{1
 
@@ -232,8 +224,19 @@ import Profile from 'lg.vim'
 
 var filter_text: string = ''
 var filtered_source: list<dict<any>>
+var incomplete: string = ''
+var job_was_interrupted: bool
+var last_filter_text: string = ''
+var last_filtered_line: number = -1
+var last_source_length: number = -1
 var menu_buf: number = -1
 var menu_winid: number = -1
+var moving_in_popup: bool
+var moving_in_popup_timer: number = -1
+var myjob: job
+var new_last_filtered_line: number = -1
+var popups_update_timer: number = -1
+var preview_timer: number = -1
 var preview_winid: number = -1
 var source: list<dict<string>>
 var source_is_being_computed: bool = false
@@ -356,6 +359,7 @@ def InitSource() #{{{2
     elseif sourcetype == 'RecentFiles'
         InitRecentFiles()
     endif
+    BailOutIfTooBig()
 enddef
 
 def InitCommandsOrMappings() #{{{2
@@ -603,8 +607,6 @@ def Job_start(cmd: string) #{{{2
         })
 enddef
 
-var myjob: job
-
 def SetIntermediateSource(_c: channel, argdata: string) #{{{2
     var data: string
     if incomplete != ''
@@ -644,9 +646,8 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
             ->mapnew((_, v) => ({text: v[0], trailing: v[1], location: ''}))
             ->AppendSource()
     endif
+    BailOutIfTooBig()
 enddef
-
-var incomplete: string = ''
 
 def SetFinalSource(...l: any) #{{{2
     # Wait for all callbacks to have been processed.{{{
@@ -661,6 +662,9 @@ def SetFinalSource(...l: any) #{{{2
     #     E684: list index out of range: 1
     #}}}
     sleep 1m
+    if job_was_interrupted
+        return
+    endif
     if sourcetype == 'Files' || sourcetype == 'Locate'
         [{text: trim(incomplete, "\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
     else
@@ -773,16 +777,13 @@ def PopupFilter(id: number, key: string): bool #{{{2
     return popup_filter_menu(id, key)
 enddef
 
-var moving_in_popup: bool
-var moving_in_popup_timer: number = -1
-
 def MaybeUpdatePopups() #{{{2
 # Purpose: Don't update the popups too often while a source is being computed by
 # numerous job callbacks.
     var current_source_length: number = len(source)
 
     # if enough lines have been accumulated
-    if current_source_length - last_filtered_line >= SOURCECHUNKSIZE
+    if current_source_length - last_filtered_line >= SOURCE_CHUNKSIZE
       # or if there are still some lines to process and the source has not changed since last time
       || last_filtered_line < current_source_length - 1
       && last_source_length == current_source_length
@@ -791,12 +792,6 @@ def MaybeUpdatePopups() #{{{2
 
     last_source_length = current_source_length
 enddef
-
-var last_filter_text: string = ''
-var last_filtered_line: number = -1
-var last_source_length: number = -1
-var new_last_filtered_line: number = -1
-var popups_update_timer: number = -1
 
 def UpdatePopups(main_text = true) #{{{2
     if main_text
@@ -827,8 +822,6 @@ def UpdatePopups(main_text = true) #{{{2
     var time: number = moving_in_popup ? UPDATEPREVIEW_WAITINGTIME : 0
     preview_timer = timer_start(time, UpdatePreview)
 enddef
-
-var preview_timer: number = -1
 
 def UpdateMainText() #{{{2
 # update the popup with the new list of lines
@@ -865,17 +858,10 @@ def UpdateMainText() #{{{2
         && filter_text !~ '\S'
         return
     endif
-    # FIXME: `'cpo'` is sometimes altered.{{{
-    #
-    # Use `Locate`.
-    # Wait for the job to finish.
-    # Type the filtering text `a`.
-    # Press `C-h` to clear the filtering text.
-    #}}}
 
     var current_source_length: number = len(source)
     new_last_filtered_line = min([
-        last_filtered_line + SOURCECHUNKSIZE,
+        last_filtered_line + SOURCE_CHUNKSIZE,
         current_source_length - 1
         ])
     var lines: list<dict<string>> = source[
@@ -1249,6 +1235,7 @@ def Clean() #{{{2
     if job_status(myjob) == 'run'
         job_was_running = true
         job_stop(myjob)
+        job_was_interrupted = true
     endif
 
     timer_stop(popups_update_timer)
@@ -1281,6 +1268,7 @@ def Reset() #{{{2
     filter_text = ''
     filtered_source = []
     incomplete = ''
+    job_was_interrupted = false
     last_filter_text = ''
     last_filtered_line = -1
     last_source_length = -1
@@ -1302,6 +1290,18 @@ def Error(msg: string) #{{{2
     echohl ErrorMsg
     echom msg
     echohl None
+enddef
+
+def BailOutIfTooBig() #{{{2
+    if len(source) <= TOO_BIG
+        return
+    endif
+    popup_close(menu_winid)
+    Clean()
+    # the timer avoids a hit-enter prompt
+    timer_start(0, () =>
+        printf('Cannot process more than %d entries', TOO_BIG)
+            ->Error())
 enddef
 
 def EchoSourceAndFilterText() #{{{2
