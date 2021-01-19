@@ -388,7 +388,7 @@ def fuzzy#main(type: string) #{{{2
     preview_winid = popup_create('', opts)
 
     InitSource()
-    MaybeUpdatePopups()
+    UpdatePopups()
 enddef
 #}}}1
 # Core {{{1
@@ -802,6 +802,8 @@ var moving_in_popup: bool
 var moving_in_popup_timer: number = -1
 
 def MaybeUpdatePopups() #{{{2
+# Purpose: Don't update the popups too often while a source is being computed by
+# numerous job callbacks.
     var current_source_length: number = len(source)
 
     # if enough lines have been accumulated
