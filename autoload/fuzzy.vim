@@ -267,53 +267,12 @@ const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
 # `matchfuzzypos()` is run asynchronously.
 #}}}
 
-# FIXME: If we reduce this constant to 10'000, we can't find some help tags, like `two-engines`.{{{
-#
-# It seems we need this constant to  be bigger than the source; which breaks the
-# chunking.
-#
-# The issue disappears if we replace this line (in `UpdateMainText()`):
-#
-#     last_filtered_line + SOURCECHUNKSIZE,
-#
-# With this one:
-#
-#     last_filtered_line + SOURCECHUNKSIZE + 5000,
-#                                          ^----^
-#
-# It also disappears if we replace this code (which is just a little later):
-#
-#     var lines: list<dict<string>> = source[
-#         last_filtered_line + 1 : new_last_filtered_line
-#         ]
-#
-# With this one:
-#
-#     var lines: list<dict<string>> = source[
-#         last_filtered_line + 1 : new_last_filtered_line + 5000
-#                                                         ^----^
-#         ]
-#
-# ---
-#
-# The issue disappears if the source is obtained synchronously.
-# That is, if you replace this line:
-#
-#     Job_start(shellpipeline)
-#
-# With this one:
-#
-#     eval systemlist(shellpipeline)
-#         ->mapnew((_, v) => split(v, '\t'))
-#         ->mapnew((_, v) => ({text: v[0], trailing: v[1], location: ''}))
-#         ->AppendSource()
-#}}}
 # Don't reduce this setting too much.{{{
 #
 # The lower it is, the harder it is  to type our filtering text; some typed keys
 # get dropped.  Empirically, it seems that you can go down to 4'000.
 #}}}
-const SOURCECHUNKSIZE: number = 15'000
+const SOURCECHUNKSIZE: number = 10'000
 
 # Init {{{1
 
@@ -736,6 +695,7 @@ def SetFinalSource(...l: any) #{{{2
         #             the last line of the shell ouput ends
         #             with an undesirable trailing newline
     endif
+    source_is_being_computed = false
     UpdatePopups()
 enddef
 
