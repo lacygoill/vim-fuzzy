@@ -293,6 +293,25 @@ const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
 #         last_filtered_line + 1 : new_last_filtered_line + 5000
 #                                                         ^----^
 #         ]
+#
+# ---
+#
+# The issue disappears if the source is obtained synchronously.
+# That is, if you replace this line:
+#
+#     Job_start(shellpipeline)
+#
+# With this one:
+#
+#     eval systemlist(shellpipeline)
+#         ->mapnew((_, v) => split(v, '\t'))
+#         ->mapnew((_, v) => ({text: v[0], trailing: v[1], location: ''}))
+#         ->AppendSource()
+#}}}
+# Don't reduce this setting too much.{{{
+#
+# The lower it is, the harder it is  to type our filtering text; some typed keys
+# get dropped.  Empirically, it seems that you can go down to 4'000.
 #}}}
 const SOURCECHUNKSIZE: number = 15'000
 
@@ -402,7 +421,7 @@ def fuzzy#main(type: string) #{{{2
 
     # create preview
     opts = popup_getoptions(menu_winid)
-    opts['line'] = opts.line - (height + BORDERS / 2)
+    opts.line = opts.line - (height + BORDERS / 2)
     remove(opts, 'callback')
     remove(opts, 'cursorline')
     remove(opts, 'filter')
@@ -410,6 +429,7 @@ def fuzzy#main(type: string) #{{{2
     preview_winid = popup_create('', opts)
 
     InitSource()
+    MaybeUpdatePopups()
 enddef
 #}}}1
 # Core {{{1
@@ -425,8 +445,6 @@ def InitSource() #{{{2
     elseif sourcetype == 'RecentFiles'
         InitRecentFiles()
     endif
-
-    MaybeUpdatePopups()
 enddef
 
 def InitCommandsOrMappings() #{{{2
@@ -828,9 +846,9 @@ def MaybeUpdatePopups() #{{{2
 
     # if enough lines have been accumulated
     if current_source_length - last_filtered_line >= SOURCECHUNKSIZE
-      # or if there are still some lines to process and the source has changed since last time
+      # or if there are still some lines to process and the source has not changed since last time
       || last_filtered_line < current_source_length - 1
-      && last_source_length != current_source_length
+      && last_source_length == current_source_length
         UpdatePopups()
     endif
 
@@ -1004,7 +1022,7 @@ def Popup_appendtext(text: list<dict<any>>) #{{{2
     var lastline: number = line('$', menu_winid)
 
     # append text
-    eval mapnew(text, (_, v) => v.text)
+    mapnew(text, (_, v) => v.text)
         ->appendbufline(menu_buf, '$')
 
     # apply text properties
