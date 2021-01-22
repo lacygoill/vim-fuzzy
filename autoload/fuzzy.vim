@@ -77,26 +77,6 @@ var loaded = true
 # TODO: In the filter popup, if `C-q` is pressed, exit and populate the qfl with
 # all the selected lines.
 
-# TODO: Implement `:FzRg`.{{{
-#
-#     $ rg --follow --glob='!.git/*' --hidden --smart-case --vimgrep '.*' .
-#                                                                         ^
-#                                                                         Vim's cwd
-#
-# Note that our  `rg(1)` use all these command-line options  by default, because
-# we wrote them in `~/.config/ripgreprc`, and because we've set this environment
-# variable in `~/.zshenv`:
-#
-#     export RIPGREP_CONFIG_PATH="$HOME/.config/ripgreprc"
-#
-# Do we still want to specify them in our Vim plugin?
-#
-# ---
-#
-# For small sources, `grep(1)` *might* be faster.  Make some tests.
-#
-#     $ grep -RHn '.*' .
-#}}}
 # TODO: Implement `:FzBLines` (lines in the current buffer).{{{
 #
 # And maybe `:Lines` to find some needle in *all* the buffers.
@@ -128,6 +108,13 @@ var loaded = true
 # TODO: Implement `:FzWindows`; open windows.
 # TODO: Should we use `delta(1)` for `:FzCommits`, `:FzBCommits`, `FzGFiles?` to format git's output?
 # If interested, see how `fzf.vim` does it.
+
+# TODO: Sometimes `Locate` is much slower than usual (from 8s to ≈ 45s).
+# And sometimes, `$ locate /` is much slower than usual (from .5s to 4s).
+# What's going on?
+# And btw, why is `Locate` so slow compared to `locate(1)`?
+# I don't think `Files` is that slow compared to `find(1)`.
+# Is it because `Locate` finds much more files?
 
 # TODO: Get rid of the Vim plugins fzf and fzf.vim.{{{
 #
@@ -193,7 +180,7 @@ const UPDATEPREVIEW_WAITINGTIME: number = 50
 const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
 
 # if we get an absurdly huge source, we should bail out
-const TOO_BIG = 1'000'000
+const TOO_BIG = 2'000'000
 
 # Maximum number of lines we're ok for `matchfuzzypos()` to process.{{{
 #
@@ -225,7 +212,6 @@ import Profile from 'lg.vim'
 var filter_text: string = ''
 var filtered_source: list<dict<any>>
 var incomplete: string = ''
-var job_was_interrupted: bool
 var last_filter_text: string = ''
 var last_filtered_line: number = -1
 var last_source_length: number = -1
@@ -350,15 +336,44 @@ enddef
 def InitSource() #{{{2
     if sourcetype == 'Commands' || sourcetype =~ '^Mappings'
         InitCommandsOrMappings()
+
     elseif sourcetype == 'Files'
-        InitFiles()
+        # How slow is `find(1)`?{{{
+        #
+        # As  an example,  currently, `find(1)`  finds  around 300K  entries in  our
+        # `$HOME`.  It needs around 5s:
+        #
+        #     $ find ... | wc -l
+        #
+        # Note  that –  when testing  –  it's important  to redirect  the output  of
+        # `find(1)` to something  else than the terminal; hence the  pipe to `wc -l`
+        # in the previous command.
+        # The terminal  would add some overhead  to regularly update the  screen and
+        # show `find(1)`'s  output.  Besides,  most (all?)  terminals can't  keep up
+        # with a command which has a fast output;  i.e. they need to drop *a lot* of
+        # lines when displaying the output.
+        #}}}
+        GetFindCmd()->Job_start()
+
+    elseif sourcetype == 'Grep'
+        # You shouldn't need to pass any option to `rg(1)`.{{{
+        #
+        # Unless you want something special.
+        # General settings should be written in: `~/.config/ripgreprc`.
+        #}}}
+        var cmd: string = executable('rg') ? "rg '.*' ." : 'grep -RHIins'
+        Job_start(cmd)
+
     elseif sourcetype == 'HelpTags'
         InitHelpTags()
+
     elseif sourcetype == 'Locate'
-        InitLocate()
+        Job_start('locate /')
+
     elseif sourcetype == 'RecentFiles'
         InitRecentFiles()
     endif
+
     BailOutIfTooBig()
 enddef
 
@@ -404,7 +419,7 @@ def InitCommandsOrMappings() #{{{2
         ->substitute('^\%(\s*\n\)*', '', '')
         # split after every "Last set from ..." line
         ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
-        # transforms each pair of lines into a dictionary
+        # transform each pair of lines into a dictionary
         ->mapnew((_, v) => ({
             text: matchstr(v, relevant)->substitute(noise, '', ''),
             # `matchstr()` extracts the filename.{{{
@@ -441,26 +456,6 @@ def InitCommandsOrMappings() #{{{2
         text: matchstr(v.text, '^\S*')->printf('%-' .. longest_name .. 'S')
             .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
         }))
-enddef
-
-def InitFiles() #{{{2
-    # How slow is `find(1)`?{{{
-    #
-    # As  an example,  currently, `find(1)`  finds  around 300K  entries in  our
-    # `$HOME`.  It needs around 5s:
-    #
-    #     $ find ... | wc -l
-    #
-    # Note  that –  when testing  –  it's important  to redirect  the output  of
-    # `find(1)` to something  else than the terminal; hence the  pipe to `wc -l`
-    # in the previous command.
-    # The terminal  would add some overhead  to regularly update the  screen and
-    # show `find(1)`'s  output.  Besides,  most (all?)  terminals can't  keep up
-    # with a command which has a fast output;  i.e. they need to drop *a lot* of
-    # lines when displaying the output.
-    #}}}
-    var findcmd: string = GetFindCmd()
-    Job_start(findcmd)
 enddef
 
 def InitHelpTags() #{{{2
@@ -559,10 +554,6 @@ def InitHelpTags() #{{{2
     Job_start(shellpipeline)
 enddef
 
-def InitLocate() #{{{2
-    Job_start('locate /')
-enddef
-
 def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
         + copy(v:oldfiles)->filter((_, v) => ExpandTilde(v)->filereadable())
@@ -608,6 +599,19 @@ def Job_start(cmd: string) #{{{2
 enddef
 
 def SetIntermediateSource(_c: channel, argdata: string) #{{{2
+    # We don't have the guarantee that when this async function will be called, we still have a source to process.{{{
+    #
+    # We  might have  interrupted  the job  one way  or  another (`ESC`,  `C-c`,
+    # `BailOutIfTooBig()`, ...).
+    #
+    # As a  test, enter a  directory with a  lot of files  (e.g. `$HOME`), press
+    # `SPC ff`, then `ESC`.  No error should ever be raised; such as this one:
+    #
+    #     E684: list index out of range: 1
+    #}}}
+    if sourcetype == ''
+        return
+    endif
     var data: string
     if incomplete != ''
         data = incomplete .. argdata
@@ -628,7 +632,7 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
     # typed text  to be matched against  the filename.  Otherwise, we  might get
     # too many irrelevant results (test with the pattern "changes").
     #}}}
-    if sourcetype == 'Files' || sourcetype == 'Locate'
+    if sourcetype == 'Files' || sourcetype == 'Locate' || sourcetype == 'Grep'
         eval splitted_data
             # TODO: How faster would be our code without this `map()`, on huge sources?{{{
             #
@@ -636,10 +640,12 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
             # If you need to bind a location to a line, include it in the popup buffer.
             # And if you don't want to see it, conceal it.
             # That shouldn't  be too costly  now that we  limit the size  of the
-            # popup buffer to 1000 lines.
+            # popup buffer.
             #}}}
             ->mapnew((_, v) => ({text: v, trailing: '', location: ''}))
             ->AppendSource()
+    # TODO: For `Grep`, our filtering text is also matched against the filepath.
+    # It should only be matched against real text.
     else
         eval splitted_data
             ->mapnew((_, v) => split(v, '\t'))
@@ -662,17 +668,16 @@ def SetFinalSource(...l: any) #{{{2
     #     E684: list index out of range: 1
     #}}}
     sleep 1m
-    if job_was_interrupted
+    if sourcetype == ''
         return
     endif
-    if sourcetype == 'Files' || sourcetype == 'Locate'
-        [{text: trim(incomplete, "\<c-j>", 2), trailing: '', location: ''}]->AppendSource()
+    # the last line of the shell ouput ends with an undesirable trailing newline
+    incomplete = incomplete->trim("\<c-j>", 2)
+    if sourcetype == 'Files' || sourcetype == 'Locate' || sourcetype == 'Grep'
+        [{text: incomplete, trailing: '', location: ''}]->AppendSource()
     else
         var parts: list<string> = split(incomplete, '\t')
-        [{text: parts[0], trailing: parts[1]->trim("\<c-j>", 2), location: ''}]->AppendSource()
-        #                                          ^------^
-        #             the last line of the shell ouput ends
-        #             with an undesirable trailing newline
+        [{text: parts[0], trailing: parts[1], location: ''}]->AppendSource()
     endif
     source_is_being_computed = false
     UpdatePopups()
@@ -993,79 +998,29 @@ def UpdateMainTitle() #{{{2
 enddef
 
 def UpdatePreview(timerid = 0) #{{{2
-    var line: list<string> = getbufline(menu_buf, line('.', menu_winid))
+    var line: string = getbufline(menu_buf, line('.', menu_winid))->get(0, '')
 
     # clear the preview if nothing matches the filtering pattern
-    if line == ['']
+    if line == ''
         popup_settext(preview_winid, '')
         return
     endif
 
-    var splitted: list<string> = line
-        ->get(0, '')
-        ->split('\t\+')
-    var left: string = ''
-    var right: string = ''
-    if len(splitted) == 2
-        [left, right] = splitted
-    elseif len(splitted) == 1
-        left = splitted[0]
-    else
+    var info: dict<string> = line->ExtractInfo()
+    if empty(info)
         return
     endif
 
-    var filename: string
-    var lnum: string
-    if sourcetype == 'HelpTags'
-        # Why passing "true, true" as argument to `globpath()`?{{{
-        #
-        # The  first  `true` can  be  useful  if  for  some reason  `'suffixes'`  or
-        # `'wildignore'` are misconfigured.
-        # The second  `true` is useful to  handle the case where  `globpath()` finds
-        # several files.  It's easier to extract the first one from a list than from
-        # a string.
-        #}}}
-        filename = globpath(&rtp, 'doc/' .. right, true, true)->get(0, '')
-    elseif index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
-        filename = ExpandTilde(left)->fnamemodify(':p')
-    elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
-        var matchlist: list<string> = (filtered_source ?? source)
-            ->get(line('.', menu_winid) - 1, {})
-            ->get('location', '')
-            ->matchlist('Last set from \(.*\) line \(\d\+\)$')
-        if len(matchlist) < 3
-            return
-        endif
-        [filename, lnum] = matchlist[1 : 2]
-        filename = ExpandTilde(filename)
-    endif
+    var filename: string = info.filename
 
+    # TODO: It would  be convenient for `M-n` to toggle  line numbers in the
+    # preview window.
     popup_setoptions(preview_winid, {title: ''})
     if !filereadable(filename)
-        win_execute(preview_winid, 'syn clear')
-        var text: string = {
-            file: 'File not readable',
-            dir: 'Directory',
-            link: 'Symbolic link',
-            bdev: 'Block device',
-            cdev: 'Character device',
-            socket: 'Socket',
-            fifo: 'FIFO',
-            other: 'unknown',
-            }->get(getftype(filename), '')
-        if text == 'Directory'
-            try
-                popup_settext(preview_winid, readdir(filename))
-            catch /^Vim\%((\a\+)\)\=:E484:/
-                popup_settext(preview_winid, 'Cannot read directory')
-            endtry
-            popup_setoptions(preview_winid, {title: ' Directory'})
-        else
-            popup_settext(preview_winid, text)
-        endif
+        filename->PreviewSpecialFile()
         return
     # don't preview a huge file (takes too much time)
-    elseif getfsize(filename) > PREVIEW_MAXSIZE
+    elseif filename->getfsize() > PREVIEW_MAXSIZE
         win_execute(preview_winid, 'syn clear')
         popup_settext(preview_winid, 'cannot preview file bigger than '
             .. float2nr(PREVIEW_MAXSIZE / pow(2, 20)) .. ' MiB')
@@ -1074,6 +1029,101 @@ def UpdatePreview(timerid = 0) #{{{2
 
     var text: list<string> = readfile(filename)
     popup_settext(preview_winid, text)
+
+    PreviewHighlight(info)
+enddef
+
+def ExtractInfo(line: string): dict<string> #{{{3
+    if sourcetype == 'Commands' || sourcetype =~ '^Mappings'
+        var matchlist: list<string> = (filtered_source ?? source)
+            ->get(line('.', menu_winid) - 1, {})
+            ->get('location', '')
+            ->matchlist('Last set from \(.*\) line \(\d\+\)$')
+        if len(matchlist) < 3
+            return {}
+        endif
+        return {
+            filename: matchlist[1]->ExpandTilde(),
+            lnum: matchlist[2],
+            }
+    endif
+
+    var splitted: list<string>
+    if sourcetype == 'Grep'
+        splitted = line
+            # remove text; only keep filename and line number
+            ->matchstr('^.\{-}:\d\+\ze:')
+            ->split('.*\zs:')
+    else
+        splitted = line->split('\t\+')
+    endif
+
+    if index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
+        if splitted->len() != 1
+            return {}
+        else
+            return {
+                filename: splitted[0]->ExpandTilde()->fnamemodify(':p'),
+                }
+        endif
+    elseif sourcetype == 'HelpTags'
+        return {
+            tagname: splitted[0]->trim()->substitute("'", "''", 'g')->escape('\'),
+            # Why passing "true, true" as argument to `globpath()`?{{{
+            #
+            # The  first  `true` can  be  useful  if  for  some reason  `'suffixes'`  or
+            # `'wildignore'` are misconfigured.
+            # The second  `true` is useful to  handle the case where  `globpath()` finds
+            # several files.  It's easier to extract the first one from a list than from
+            # a string.
+            #}}}
+            filename: globpath(&rtp, 'doc/' .. splitted[1], true, true)->get(0, ''),
+            }
+    else
+        return {
+            filename: splitted[0]->ExpandTilde()->fnamemodify(':p'),
+            lnum: splitted[1],
+            }
+    endif
+enddef
+
+def PreviewSpecialFile(filename: string) #{{{3
+    win_execute(preview_winid, 'syn clear')
+    var text: string = {
+        file: 'File not readable',
+        dir: 'Directory',
+        link: 'Symbolic link',
+        bdev: 'Block device',
+        cdev: 'Character device',
+        socket: 'Socket',
+        fifo: 'FIFO',
+        other: 'unknown',
+        }->get(getftype(filename), '')
+    if text == 'Directory'
+        try
+            popup_settext(preview_winid, readdir(filename))
+        catch /^Vim\%((\a\+)\)\=:E484:/
+            popup_settext(preview_winid, 'Cannot read directory')
+        endtry
+        popup_setoptions(preview_winid, {title: ' Directory'})
+    else
+        popup_settext(preview_winid, text)
+    endif
+enddef
+
+def PreviewHighlight(info: dict<string>) #{{{3
+    var filename: string
+    var lnum: string
+    var tagname: string
+    if has_key(info, 'filename')
+        filename = info.filename
+    endif
+    if has_key(info, 'lnum')
+        lnum = info.lnum
+    endif
+    if has_key(info, 'tagname')
+        tagname = info.tagname
+    endif
 
     def Prettify()
         # Why clearing the syntax first?{{{
@@ -1103,7 +1153,9 @@ def UpdatePreview(timerid = 0) #{{{2
             .. fnameescape(filename)
         var fullconceal: string = '&l:cole = 3'
         var unfold: string = 'norm! zR'
-        var whereAmI: string = sourcetype == 'Commands' || sourcetype =~ '^Mappings' ? '&l:cul = true' : ''
+        var whereAmI: string = sourcetype == 'Commands' || sourcetype =~ '^Mappings'
+            ? '&l:cul = true'
+            : ''
         win_execute(preview_winid, [setsyntax, fullconceal, unfold, whereAmI])
     enddef
 
@@ -1114,7 +1166,6 @@ def UpdatePreview(timerid = 0) #{{{2
             do Syntax help
             endif
         END
-        var tagname: string = left->trim()->substitute("'", "''", 'g')->escape('\')
         var searchcmd: string = printf("echo search('\\*\\V%s\\m\\*', 'n')", tagname)
         # Why not just running `search()`?{{{
         #
@@ -1122,11 +1173,11 @@ def UpdatePreview(timerid = 0) #{{{2
         # You'll need to run `:redraw`; but the latter causes some flicker (with the
         # cursor, and in the statusline, tabline).
         #}}}
-        lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>", 2)
+        lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>")
         var showtag: string = 'norm! ' .. lnum .. 'G'
         win_execute(preview_winid, setsyntax + ['&l:cole = 3', showtag])
 
-    elseif sourcetype == 'Commands' || sourcetype =~ '^Mappings'
+    elseif sourcetype == 'Commands' || sourcetype == 'Grep' || sourcetype =~ '^Mappings'
         win_execute(preview_winid, 'norm! ' .. lnum .. 'Gzz')
         Prettify()
         popup_setoptions(preview_winid, {title: ' ' .. filename})
@@ -1138,7 +1189,7 @@ def UpdatePreview(timerid = 0) #{{{2
         endif
     endif
 enddef
-
+#}}}1
 def ExitCallback(type: string, id: number, result: any) #{{{2
     var idx: any = result
     var howtoopen: string = ''
@@ -1195,21 +1246,17 @@ def ExitCallback(type: string, id: number, result: any) #{{{2
         if index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
             Open(chosen, howtoopen)
 
+        elseif type == 'Grep'
+            matchlist(chosen, '^\(.\{-}\):\(\d\+\):')
+                ->Open(howtoopen)
         elseif type == 'HelpTags'
             exe 'h ' .. chosen
 
         elseif type == 'Commands' || type =~ '^Mappings'
-            var matchlist: list<string> = get(filtered_source ?? source, idx - 1, {})
+            get(filtered_source ?? source, idx - 1, {})
                 ->get('location')
                 ->matchlist('Last set from \(.*\) line \(\d\+\)$')
-            if len(matchlist) < 3
-                return
-            endif
-            var filename: string
-            var lnum: string
-            [filename, lnum] = matchlist[1 : 2]
-            Open(filename, howtoopen)
-            exe 'norm! ' .. lnum .. 'G'
+                ->Open(howtoopen)
         endif
         norm! zv
     catch
@@ -1221,42 +1268,40 @@ def ExitCallback(type: string, id: number, result: any) #{{{2
     endtry
 enddef
 
-def Open(filename: string, how: string)
-    var file: string = filename->fnameescape()
-    var cmd: string = get({insplit: 'sp', intab: 'tabe', invertsplit: 'vs'}, how, 'e')
-    exe cmd .. ' ' .. file
+def Open(matchlist: any, how: string) #{{{2
+    var cmd: string = get({
+        insplit: 'sp',
+        intab: 'tabe',
+        invertsplit: 'vs'
+        }, how, 'e')
+
+    var filename: string
+    if matchlist->typename() == 'string'
+        filename = matchlist
+        exe cmd .. ' ' .. filename->fnameescape()
+        return
+    endif
+
+    if matchlist->typename() == 'list<string>' && len(matchlist) < 3
+        return
+    endif
+
+    var lnum: string
+    [filename, lnum] = matchlist[1 : 2]
+    exe cmd .. ' ' .. filename->fnameescape()
+    exe 'norm! ' .. lnum .. 'G'
 enddef
 
 def Clean() #{{{2
     # the job  makes certain assumptions  (like the existence of  popups); let's
     # stop it  first, to avoid  any issue if we  break one of  these assumptions
     # later
-    var job_was_running: bool = false
     if job_status(myjob) == 'run'
-        job_was_running = true
         job_stop(myjob)
-        job_was_interrupted = true
     endif
 
     timer_stop(popups_update_timer)
-
     popup_close(preview_winid)
-
-    if job_was_running
-        # TODO: We need this in case we exit the popup while a job is still running.{{{
-        #
-        # Otherwise, this  error might  be given  from `SetIntermediateSource()`
-        # and `SetFinalSource()`:
-        #
-        #     E684: list index out of range: 1
-        #
-        # To do  a test, enter a  directory with a lot  of files (e.g. `$HOME`),
-        # press `SPC ff`, then `ESC`.
-        #
-        # Is there a better way of fixing this issue?
-        #}}}
-        sleep 1m
-    endif
 
     # clear the message displayed at the command-line
     echo ''
@@ -1268,7 +1313,6 @@ def Reset() #{{{2
     filter_text = ''
     filtered_source = []
     incomplete = ''
-    job_was_interrupted = false
     last_filter_text = ''
     last_filtered_line = -1
     last_source_length = -1
@@ -1326,6 +1370,11 @@ def UtilityIsMissing(): bool #{{{2
         #}}}
         if !executable('find')
             Error('Require find')
+            return true
+        endif
+    elseif sourcetype == 'Grep'
+        if !executable('rg') && !executable('grep')
+            Error('Require rg/grep')
             return true
         endif
     endif

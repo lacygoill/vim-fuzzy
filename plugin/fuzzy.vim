@@ -5,6 +5,7 @@ var loaded = true
 
 nno <space>fc <cmd>call fuzzy#main('Commands')<cr>
 nno <space>ff <cmd>call fuzzy#main('Files')<cr>
+nno <space>fgg <cmd>call fuzzy#main('Grep')<cr>
 nno <space>fh <cmd>call fuzzy#main('HelpTags')<cr>
 # How is `Locate` useful compared to `Files`?{{{
 #
