@@ -207,8 +207,6 @@ const SOURCE_CHUNKSIZE: number = 10'000
 
 # Init {{{1
 
-import Profile from 'lg.vim'
-
 var filter_text: string = ''
 var filtered_source: list<dict<any>>
 var incomplete: string = ''
@@ -221,6 +219,7 @@ var moving_in_popup: bool
 var moving_in_popup_timer: number = -1
 var myjob: job
 var new_last_filtered_line: number = -1
+var popup_width: number
 var popups_update_timer: number = -1
 var preview_timer: number = -1
 var preview_winid: number = -1
@@ -230,7 +229,6 @@ var sourcetype: string
 
 # Interface {{{1
 def fuzzy#main(type: string) #{{{2
-    Profile()
     # Without this reset, we might wrongly re-use a stale source.{{{
     #
     #     $ cd && vim
@@ -284,7 +282,7 @@ def fuzzy#main(type: string) #{{{2
         return
     endif
 
-    var width: number = min([TEXTWIDTH, &columns - BORDERS])
+    popup_width = min([TEXTWIDTH, &columns - BORDERS])
     var line: number = &lines - &ch - statusline - height - 1
 
     var opts: dict<any> = {
@@ -293,8 +291,8 @@ def fuzzy#main(type: string) #{{{2
         pos: 'topleft',
         maxheight: height,
         minheight: height,
-        maxwidth: width,
-        minwidth: width,
+        maxwidth: popup_width,
+        minwidth: popup_width,
         # Set a title displaying some info about the numbers of entries we're dealing with.{{{
         #
         # Example:
@@ -633,7 +631,7 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
     # too many irrelevant results (test with the pattern "changes").
     #}}}
     if sourcetype == 'Files' || sourcetype == 'Locate' || sourcetype == 'Grep'
-        eval splitted_data
+        splitted_data
             # TODO: How faster would be our code without this `map()`, on huge sources?{{{
             #
             # Maybe we should get rid of this transformation.
@@ -647,7 +645,7 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
     # TODO: For `Grep`, our filtering text is also matched against the filepath.
     # It should only be matched against real text.
     else
-        eval splitted_data
+        splitted_data
             ->mapnew((_, v) => split(v, '\t'))
             ->mapnew((_, v) => ({text: v[0], trailing: v[1], location: ''}))
             ->AppendSource()
@@ -909,23 +907,33 @@ def UpdateMainText() #{{{2
 enddef
 
 def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
+    var InjectTextProps: func
     # add info to get highlight via text properties
     if filter_text =~ '\S'
         var matches: list<dict<any>>
         var pos: list<list<number>>
         var scores: list<number>
         [matches, pos, scores] = matchfuzzypos(lines, filter_text, {key: 'text'})
-        # No need to process *all* the matches.
-        # The popup can only display a limited amount of them.
+        InjectTextProps = (i, v) => ({
+            text: v.text .. "\t" .. v.trailing,
+            props: mapnew(pos[i], (_, w) => ({
+                col: w + 1,
+                length: 1,
+                type: 'fuzzyMatch'
+                }))
+            + [{
+                col: v.text->strlen() + 1,
+                end_col: popup_width,
+                type: 'fuzzyTrailing'
+                }],
+            location: v.location,
+            score: scores[i]
+            })
         matches = matches
             ->slice(0, POPUP_MAXLINES)
-            ->mapnew((i, v) => ({
-                text: v.text .. "\t" .. v.trailing,
-                props: mapnew(pos[i], (_, w) => ({col: w + 1, length: 1, type: 'fuzzyMatch'}))
-                    + [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
-                location: v.location,
-                score: scores[i]
-                }))
+            # No need to process *all* the matches.
+            # The popup can only display a limited amount of them.
+            ->mapnew(InjectTextProps)
         # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
         # works as expected later (i.e. can determine which entry we've chosen).
         filtered_source += matches
@@ -935,13 +943,18 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
 
         return filtered_source
     else
+        InjectTextProps = (_, v) => ({
+            text: v.text .. "\t" .. v.trailing,
+            props: [{
+                col: v.text->strlen() + 1,
+                end_col: popup_width,
+                type: 'fuzzyTrailing'
+                }],
+            location: v.location,
+            })
         return lines
             ->slice(0, POPUP_MAXLINES)
-            ->mapnew((_, v) => ({
-                text: v.text .. "\t" .. v.trailing,
-                props: [{col: v.text->strlen() + 1, end_col: 999, type: 'fuzzyTrailing'}],
-                location: v.location,
-                }))
+            ->mapnew(InjectTextProps)
     endif
 enddef
 
