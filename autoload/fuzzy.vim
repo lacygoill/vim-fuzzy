@@ -670,7 +670,7 @@ def SetFinalSource(...l: any) #{{{2
         return
     endif
     # the last line of the shell ouput ends with an undesirable trailing newline
-    incomplete = incomplete->trim("\<c-j>", 2)
+    incomplete = incomplete->trim("\<NL>", 2)
     if sourcetype == 'Files' || sourcetype == 'Locate' || sourcetype == 'Grep'
         [{text: incomplete, trailing: '', location: ''}]->AppendSource()
     else
@@ -1186,7 +1186,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
         # You'll need to run `:redraw`; but the latter causes some flicker (with the
         # cursor, and in the statusline, tabline).
         #}}}
-        lnum = win_execute(preview_winid, searchcmd)->trim("\<c-j>")
+        lnum = win_execute(preview_winid, searchcmd)->trim("\<NL>")
         var showtag: string = 'norm! ' .. lnum .. 'G'
         win_execute(preview_winid, setsyntax + ['&l:cole = 3', showtag])
 
@@ -1206,13 +1206,13 @@ enddef
 def ExitCallback(type: string, id: number, result: any) #{{{2
     var idx: any = result
     var howtoopen: string = ''
-    if type(result) == v:t_number && result <= 0
+    if typename(result) == 'number' && result <= 0
         # If a job  has been started, and  we want to kill it  by pressing `C-c`
         # because  it takes  too much  time, `job_stop()`  must be  invoked here
         # (which `Clean()` does).
         Clean()
         return
-    elseif type(result) == v:t_dict
+    elseif typename(result) =~ '^dict'
         idx = result.idx
         howtoopen = result.howtoopen
     endif
