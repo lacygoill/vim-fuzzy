@@ -146,9 +146,24 @@ var loaded = true
 
 # Config {{{1
 
-const TEXTWIDTH: number = 80
 # 2 popups = 4 borders
 const BORDERS: number = 4
+
+# when filtering, ignore matches with a  too low score (the lower this variable,
+# the more matches, but also the more irrelevant some of them might be)
+# How to find a good value?{{{
+#
+# Try to compare the results with `fzf(1)`.
+# For example, you could dump the normal mappings table in a file, and pass it to `fzf(1)`:
+#
+#     $ cat /tmp/dump | fzf
+#
+# Type some filtering text, and compare  the number of remaining entries to what
+# you  get in  Vim.  Decrease  `MIN_SCORE`  if you  think you  don't get  enough
+# matches; increase it if you think you get too many matches.
+#}}}
+const MIN_SCORE = 70
+
 # There is no need to display *all* the filtered lines in the popup.{{{
 #
 # Suppose 10000 lines match your filter text; are you really going to select the
@@ -175,11 +190,7 @@ const BORDERS: number = 4
 #}}}
 const POPUP_MAXLINES: number = 100
 
-const UPDATEPREVIEW_WAITINGTIME: number = 50
 const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
-
-# if we get an absurdly huge source, we should bail out
-const TOO_BIG = 2'000'000
 
 # Maximum number of lines we're ok for `matchfuzzypos()` to process.{{{
 #
@@ -203,6 +214,13 @@ const TOO_BIG = 2'000'000
 # get dropped.  Empirically, it seems that you can go down to 4'000.
 #}}}
 const SOURCE_CHUNKSIZE: number = 10'000
+
+const TEXTWIDTH: number = 80
+
+# if we get an absurdly huge source, we should bail out
+const TOO_BIG = 2'000'000
+
+const UPDATEPREVIEW_WAITINGTIME: number = 50
 
 # Init {{{1
 
@@ -948,6 +966,12 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
         # works as expected later (i.e. can determine which entry we've chosen).
         filtered_source += matches
         filtered_source = filtered_source
+            # Don't use `MIN_SCORE` when we've only typed a single character.{{{
+            #
+            # Otherwise,  we  might  get  more matches  after  adding  a  second
+            # character in the filtering text, which is jarring.
+            #}}}
+            ->filter(strlen(filter_text) <= 1 ? (_, v) => v.score > 0 : (_, v) => v.score > MIN_SCORE)
             ->sort((a, b) => a.score == b.score ? 0 : a.score > b.score ? -1 : 1)
             ->slice(0, POPUP_MAXLINES)
 
