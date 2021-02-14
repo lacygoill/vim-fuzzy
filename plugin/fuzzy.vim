@@ -20,3 +20,7 @@ nno <space>fmi <cmd>call fuzzy#main('Mappings (i)')<cr>
 nno <space>fmo <cmd>call fuzzy#main('Mappings (o)')<cr>
 
 nno <space>fr <cmd>call fuzzy#main('RecentFiles')<cr>
+
+nno "<c-f> <cmd>call fuzzy#main('Registers"')<cr>
+nno @<c-f> <cmd>call fuzzy#main('Registers@')<cr>
+ino <c-r><c-f> <cmd>call fuzzy#main('Registers<c-r>')<cr>

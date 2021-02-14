@@ -103,7 +103,6 @@ var loaded = true
 # TODO: Implement `:FzMarks`.
 # TODO: Implement `:FzRecentExCommands`.
 # TODO: Implement `:FzRecentSearchCommands`.
-# TODO: Implement `:FzRegisters`.
 # TODO: Implement `:FzTags`; tags in the project.
 # TODO: Implement `:FzWindows`; open windows.
 # TODO: Should we use `delta(1)` for `:FzCommits`, `:FzBCommits`, `FzGFiles?` to format git's output?
@@ -315,7 +314,8 @@ def fuzzy#main(type: string) #{{{2
     menu_winid = popup_menu('', opts)
     menu_buf = winbufnr(menu_winid)
     prop_type_add('fuzzyMatch', {bufnr: menu_buf, highlight: 'Title'})
-    prop_type_add('fuzzyTrailing', {bufnr: menu_buf, highlight: 'Comment'})
+    prop_type_add('fuzzyHeader', {bufnr: menu_buf, highlight: 'Comment'})
+    prop_type_add('fuzzyTrailer', {bufnr: menu_buf, highlight: 'Comment'})
 
     # create preview
     opts = popup_getoptions(menu_winid)
@@ -370,6 +370,9 @@ def InitSource() #{{{2
 
     elseif sourcetype == 'RecentFiles'
         InitRecentFiles()
+
+    elseif sourcetype =~ '^Registers'
+        InitRegisters()
     endif
 
     BailOutIfTooBig()
@@ -379,6 +382,7 @@ def InitCommandsOrMappings() #{{{2
     var cmd: string
     var relevant: string
     var noise: string
+
     if sourcetype == 'Commands'
         cmd = 'verb com'
         # The first 4 characters are used for flags, and what comes after the newline is irrelevant.{{{
@@ -396,6 +400,7 @@ def InitCommandsOrMappings() #{{{2
         #                └ Args
         #}}}
         noise = '^\S*\zs.*\ze\%43c.*'
+
     elseif sourcetype =~ '^Mappings'
         cmd = 'verb ' .. sourcetype[-2]->tolower() .. 'map'
         # The first 3 characters are used for the mode.{{{
@@ -412,6 +417,7 @@ def InitCommandsOrMappings() #{{{2
         #}}}
         noise = '^\S*\s\+\zs[*&]\=[@ ]\='
     endif
+
     source = execute(cmd)
         # remove first empty lines
         ->substitute('^\%(\s*\n\)*', '', '')
@@ -427,7 +433,7 @@ def InitCommandsOrMappings() #{{{2
             #
             # And `substitute()` replaces ` line 123` into `:123`.
             #}}}
-            trailing: matchstr(v, '/\zs[^/\\]*$')->substitute(' [^ ]* ', ':', ''),
+            trailer: matchstr(v, '/\zs[^/\\]*$')->substitute(' [^ ]* ', ':', ''),
             # Don't invoke `ExpandTilde()` right now; it might be a little costly.{{{
             #
             # It was too costly in the past when we used `expand()`.  Now we use
@@ -560,7 +566,21 @@ def InitRecentFiles() #{{{2
     source = recentfiles
         ->filter((_, v) => v != '' && v != curbuf && !isdirectory(v))
         ->Uniq()
-        ->mapnew((_, v) => ({text: fnamemodify(v, ':~:.'), trailing: '', location: ''}))
+        ->mapnew((_, v) => ({
+            text: fnamemodify(v, ':~:.'),
+            trailer: '',
+            location: ''
+            }))
+enddef
+
+def InitRegisters() #{{{2
+    source = execute('reg')
+        ->split('\n')[1 :]
+        # trim leading whitespace  (useful to filter based on  type; e.g. typing
+        # `^b` will leave only blockwise registers)
+        ->map((_, v) => substitute(v, '^\s\+', '', ''))
+        ->mapnew((_, v) => matchlist(v, '^\(\S  "\S   \)\(.*\)'))
+        ->mapnew((_, v) => ({text: v[2], header: v[1], trailer: '', location: ''}))
 enddef
 
 def Job_start(cmd: string) #{{{2
@@ -640,14 +660,14 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
             # That shouldn't  be too costly  now that we  limit the size  of the
             # popup buffer.
             #}}}
-            ->mapnew((_, v) => ({text: v, trailing: '', location: ''}))
+            ->mapnew((_, v) => ({text: v, trailer: '', location: ''}))
             ->AppendSource()
     # TODO: For `Grep`, our filtering text is also matched against the filepath.
     # It should only be matched against real text.
     else
         splitted_data
             ->mapnew((_, v) => split(v, '\t'))
-            ->mapnew((_, v) => ({text: v[0], trailing: v[1], location: ''}))
+            ->mapnew((_, v) => ({text: v[0], trailer: v[1], location: ''}))
             ->AppendSource()
     endif
     BailOutIfTooBig()
@@ -672,10 +692,10 @@ def SetFinalSource(...l: any) #{{{2
     # the last line of the shell ouput ends with an undesirable trailing newline
     incomplete = incomplete->trim("\<NL>", 2)
     if sourcetype == 'Files' || sourcetype == 'Locate' || sourcetype == 'Grep'
-        [{text: incomplete, trailing: '', location: ''}]->AppendSource()
+        [{text: incomplete, trailer: '', location: ''}]->AppendSource()
     else
         var parts: list<string> = split(incomplete, '\t')
-        [{text: parts[0], trailing: parts[1], location: ''}]->AppendSource()
+        [{text: parts[0], trailer: parts[1], location: ''}]->AppendSource()
     endif
     source_is_being_computed = false
     UpdatePopups()
@@ -701,6 +721,8 @@ def PopupFilter(id: number, key: string): bool #{{{2
     # clear the filter text entirely
     elseif key == "\<c-u>"
         filter_text = ''
+        # The popup menu might get empty without this.
+        last_filtered_line = -1
         UpdatePopups()
         return true
 
@@ -714,8 +736,8 @@ def PopupFilter(id: number, key: string): bool #{{{2
 
     # select a neighboring line
     elseif index(["\<down>", "\<up>", "\<c-n>", "\<c-p>"], key) >= 0
-        var curline: number = line('.', id)
-        var lastline: number = line('$', id)
+        var curline: number = line('.', menu_winid)
+        var lastline: number = line('$', menu_winid)
         # No need to update the popup if we try to move beyond the first/last line.{{{
         #
         # Besides, if  you let Vim  update the popup  in those cases,  it causes
@@ -734,7 +756,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
             () => execute('moving_in_popup = false'))
 
         var cmd: string = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
-        win_execute(id, cmd)
+        win_execute(menu_winid, cmd)
         UpdatePopups(false)
         return true
 
@@ -760,14 +782,18 @@ def PopupFilter(id: number, key: string): bool #{{{2
         UpdatePreview()
         return true
 
+    elseif key == "\<c-o>" && sourcetype =~ '^Registers'
+        ToggleSelectedRegisterType()
+        return true
+
     elseif index(["\<c-s>", "\<c-t>", "\<c-v>"], key) >= 0
-        popup_close(id, {
+        popup_close(menu_winid, {
             howtoopen: {
                 ["\<c-s>"]: 'insplit',
                 ["\<c-t>"]: 'intab',
                 ["\<c-v>"]: 'invertsplit'
                 }[key],
-            idx: line('.', id),
+            idx: line('.', menu_winid),
         })
         return true
 
@@ -777,7 +803,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         return true
     endif
 
-    return popup_filter_menu(id, key)
+    return popup_filter_menu(menu_winid, key)
 enddef
 
 def MaybeUpdatePopups() #{{{2
@@ -907,33 +933,17 @@ def UpdateMainText() #{{{2
 enddef
 
 def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
-    var InjectTextProps: func
     # add info to get highlight via text properties
     if filter_text =~ '\S'
         var matches: list<dict<any>>
         var pos: list<list<number>>
         var scores: list<number>
         [matches, pos, scores] = matchfuzzypos(lines, filter_text, {key: 'text'})
-        InjectTextProps = (i, v) => ({
-            text: v.text .. "\t" .. v.trailing,
-            props: mapnew(pos[i], (_, w) => ({
-                col: w + 1,
-                length: 1,
-                type: 'fuzzyMatch'
-                }))
-            + [{
-                col: v.text->strlen() + 1,
-                end_col: popup_width,
-                type: 'fuzzyTrailing'
-                }],
-            location: v.location,
-            score: scores[i]
-            })
         matches = matches
             ->slice(0, POPUP_MAXLINES)
             # No need to process *all* the matches.
             # The popup can only display a limited amount of them.
-            ->mapnew(InjectTextProps)
+            ->mapnew(InjectTextProps(filter_text, pos, scores))
         # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
         # works as expected later (i.e. can determine which entry we've chosen).
         filtered_source += matches
@@ -943,19 +953,86 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
 
         return filtered_source
     else
-        InjectTextProps = (_, v) => ({
-            text: v.text .. "\t" .. v.trailing,
+        return lines
+            ->slice(0, POPUP_MAXLINES)
+            ->mapnew(InjectTextProps())
+    endif
+enddef
+
+def InjectTextProps( #{{{2
+    filter_text = '',
+    pos: list<list<number>> = [],
+    scores: list<number> = []
+    ): func(number, dict<any>): dict<any>
+
+    if filter_text !~ '\S' && sourcetype !~ '^Registers'
+        return (_, v: dict<string>) => ({
+            text: v.text .. "\t" .. v.trailer,
             props: [{
                 col: v.text->strlen() + 1,
                 end_col: popup_width,
-                type: 'fuzzyTrailing'
+                type: 'fuzzyTrailer'
                 }],
             location: v.location,
             })
-        return lines
-            ->slice(0, POPUP_MAXLINES)
-            ->mapnew(InjectTextProps)
+
+    elseif filter_text !~ '\S' && sourcetype =~ '^Registers'
+        return (_, v: dict<string>) => ({
+            header: v.header,
+            text: v.header .. v.text .. "\t" .. v.trailer,
+            props: [{
+                col: 0,
+                end_col: v.header->strlen(),
+                type: 'fuzzyHeader'
+                }]
+            + [{
+                col: (v.header .. v.text)->strlen() + 1,
+                end_col: popup_width,
+                type: 'fuzzyTrailer'
+                }],
+            })
+
+    elseif filter_text =~ '\S' && sourcetype !~ '^Registers'
+        return (i: number, v: dict<any>) => ({
+            text: v.text .. "\t" .. v.trailer,
+            props: mapnew(pos[i], (_, w: number) => ({
+                col: w + 1,
+                length: 1,
+                type: 'fuzzyMatch'
+                }))
+            + [{
+                col: v.text->strlen() + 1,
+                end_col: popup_width,
+                type: 'fuzzyTrailer'
+                }],
+            location: v.location,
+            score: scores[i]
+            })
+
+    elseif filter_text =~ '\S' && sourcetype =~ '^Registers'
+        return (i: number, v: dict<any>) => ({
+            header: v.header,
+            text: v.header .. v.text .. "\t" .. v.trailer,
+            props: mapnew(pos[i], (_, w: number) => ({
+                col: w + 1 + strlen(v.header),
+                length: 1,
+                type: 'fuzzyMatch'
+                }))
+            + [{
+                col: 0,
+                end_col: v.header->strlen(),
+                type: 'fuzzyHeader'
+                }]
+            + [{
+                col: (v.header .. v.text)->strlen() + 1,
+                end_col: popup_width,
+                type: 'fuzzyTrailer'
+                }],
+            score: scores[i]
+            })
     endif
+
+    return (_, __) => ({})
 enddef
 
 def UpdateMainTitle() #{{{2
@@ -1022,6 +1099,10 @@ def UpdatePreview(timerid = 0) #{{{2
     var info: dict<string> = line->ExtractInfo()
     if empty(info)
         return
+    elseif sourcetype =~ '^Registers'
+        popup_setoptions(preview_winid, {title: ' "' .. info.registername .. ' '})
+        popup_settext(preview_winid, getreg(info.registername, true, true))
+        return
     endif
 
     var filename: string = info.filename
@@ -1067,6 +1148,8 @@ def ExtractInfo(line: string): dict<string> #{{{3
             # remove text; only keep filename and line number
             ->matchstr('^.\{-}:\d\+\ze:')
             ->split('.*\zs:')
+    elseif sourcetype =~ '^Registers'
+        return {registername: line->matchstr('"\zs.')}
     else
         splitted = line->split('\t\+')
     endif
@@ -1202,7 +1285,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
         endif
     endif
 enddef
-#}}}1
+#}}}2
 def ExitCallback(type: string, id: number, result: any) #{{{2
     var idx: any = result
     var howtoopen: string = ''
@@ -1218,6 +1301,20 @@ def ExitCallback(type: string, id: number, result: any) #{{{2
     endif
 
     try
+        if sourcetype =~ '^Registers'
+            var regname: string = (filtered_source ?? source)
+                ->get(idx - 1)
+                ->get('header', '')
+                ->matchstr('^[bcl]  "\zs.')
+            var prefixkey: string = sourcetype->matchstr('Registers\zs.*')
+            if prefixkey == '<c-r>'
+                feedkeys((col('.') >= col('$') - 1 ? 'a' : 'i') .. "\<c-r>\<c-r>" .. regname, 'in')
+            else
+                feedkeys(prefixkey .. regname, 'in')
+            endif
+            return
+        endif
+
         var chosen: string = (filtered_source ?? source)
             ->get(idx - 1, {})
             ->get('text', '')
@@ -1530,5 +1627,32 @@ def FormatBigNumber(str: string): string #{{{2
     else
         return str[0] .. FormatBigNumber(str[1 :])
     endif
+enddef
+
+def ToggleSelectedRegisterType() #{{{2
+# toggle type of selected register (characterwise → linewise → blockwise → ...)
+
+    var lnum: number = line('.', menu_winid)
+    var line: string = getbufline(menu_buf, lnum)->get(0, '')
+    var matchlist: list<string> = line->matchlist('^\([bcl]\)  "\(.\)')
+    if matchlist->len() < 3
+        return
+    endif
+    var regtype: string = matchlist[1]
+    var regname: string = matchlist[2]
+    setreg(regname, {
+        regtype: {b: 'c', c: 'l', l: 'b'}[regtype],
+        regcontents: getreg(regname, true, true),
+        })
+
+    # reset the source so that the new type is picked up
+    InitRegisters()
+    # Necessary  to prevent  duplicated entries  from being  added in  the popup
+    # menu, each time we press `C-o` while there is a filtering text.
+    filtered_source = []
+    # Necessary to prevent the popup menu from being emptied.
+    last_filtered_line = -1
+    # finally, we can refresh the popup menu
+    UpdateMainText()
 enddef
 
