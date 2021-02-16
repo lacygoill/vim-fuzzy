@@ -47,13 +47,6 @@ var loaded = true
 # use the new feature to get an editable prompt.
 #}}}
 
-# TODO: Implement an hourglass-like  indicator in the popup's  title.  You can't
-# rely  on the  numbers growing  in the  title.  Vim  might be  still processing
-# without any number growing.  Or the numbers could be growing erratically.  For
-# example, right now, if we use  `Locate`, and type `foobarbaz`, right after the
-# `z` is inserted, there is an unusal long  time for the title to go from `1/16`
-# to the final `1/32`.  We need a more predictable indicator.
-
 # TODO: For each mapping, implement the counterpart Ex command.
 # It would be especially useful for huge sources.
 # For example:
@@ -149,6 +142,8 @@ var loaded = true
 # 2 popups = 4 borders
 const BORDERS: number = 4
 
+const HOURGLASS_CHARS: list<string> = ['―', '\', '|', '/']
+
 # when filtering, ignore matches with a  too low score (the lower this variable,
 # the more matches, but also the more irrelevant some of them might be)
 # How to find a good value?{{{
@@ -161,8 +156,12 @@ const BORDERS: number = 4
 # Type some filtering text, and compare  the number of remaining entries to what
 # you  get in  Vim.  Decrease  `MIN_SCORE`  if you  think you  don't get  enough
 # matches; increase it if you think you get too many matches.
+#
+# Beware that if you increase the  score too much, sometimes, adding a character
+# in the filter  text might increase the  number of matches (e.g. from  0 to 1),
+# which is jarring.
 #}}}
-const MIN_SCORE = 70
+const MIN_SCORE = 50
 
 # There is no need to display *all* the filtered lines in the popup.{{{
 #
@@ -224,12 +223,16 @@ const UPDATEPREVIEW_WAITINGTIME: number = 50
 
 # Init {{{1
 
+var elapsed: float
 var filter_text: string = ''
 var filtered_source: list<dict<any>>
+var hourglass_idx: number = 0
 var incomplete: string = ''
+var job_failed: bool
+var job_started: bool
 var last_filter_text: string = ''
 var last_filtered_line: number = -1
-var last_source_length: number = -1
+var last_time: list<any>
 var menu_buf: number = -1
 var menu_winid: number = -1
 var moving_in_popup: bool
@@ -293,9 +296,7 @@ def fuzzy#main(type: string) #{{{2
     enddef
     height -= Offset()
     if height <= 0
-        echohl ErrorMsg
-        echom 'vim-fuzzy: Not enough room'
-        echohl NONE
+        Error('vim-fuzzy: Not enough room')
         return
     endif
 
@@ -345,6 +346,11 @@ def fuzzy#main(type: string) #{{{2
     preview_winid = popup_create('', opts)
 
     InitSource()
+    if job_started && job_failed
+        popup_close(menu_winid)
+        Clean()
+        return
+    endif
     UpdatePopups()
 enddef
 #}}}1
@@ -628,10 +634,35 @@ def Job_start(cmd: string) #{{{2
     source_is_being_computed = true
     myjob = job_start(['/bin/sh', '-c', cmd], {
         out_cb: SetIntermediateSource,
-        exit_cb: SetFinalSource,
+        close_cb: SetFinalSource,
         mode: 'raw',
         noblock: true,
+        # TODO: The `asyncmake` plugin uses these options:{{{
+        #
+        #     callback: function(MakeProcessOutput, [qfid]),
+        #     close_cb: function(MakeCloseCb, [qfid]),
+        #     exit_cb: MakeCompleted,
+        #     in_io: 'null'
+        #
+        # Should we change some of our options?
+        #}}}
         })
+    job_started = true
+
+    if job_status(myjob) == 'fail'
+        # shorten message to avoid a hit-enter prompt
+        var msg: string = printf('[vim-fuzzy] Failed to run:  %s', cmd)
+        if strchars(msg, true) > (v:echospace + (&cmdheight - 1) * &columns)
+            var n: number = v:echospace - 3
+            var n1: number = n % 2 ? n / 2 : n / 2 - 1
+            var n2: number = n / 2
+            msg = matchlist(msg, '\(.\{' .. n1 .. '}\).*\(.\{' .. n2 .. '}\)')[1 : 2]->join('...')
+        endif
+        # even though the message is shortened, we still get a weird hit-enter prompt;
+        # delaying the message fixes the issue
+        timer_start(0, () => Error(msg))
+        job_failed = true
+    endif
 enddef
 
 def SetIntermediateSource(_c: channel, argdata: string) #{{{2
@@ -692,18 +723,46 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
 enddef
 
 def SetFinalSource(...l: any) #{{{2
-    # Wait for all callbacks to have been processed.{{{
+    # TODO: In the past we needed a `sleep 1m` here.{{{
     #
-    # From `:h job-exit_cb`:
+    # That was necessary to avoid an error raised when evaluating `parts[1]`:
+    #
+    #     E684: list index out of range: 1
+    #
+    # I  *think* the  issue  was due  to the  fact  that `SetFinalSource()`  was
+    # invoked as an exit callback.  From `:h job-exit_cb`:
     #
     #    > Note that data can be buffered, callbacks may still be
     #    > called after the process ends.
     #
-    # Without this sleep, sometimes, `parts[1]` would raise:
+    # So, we had to  wait a little to have the guarantee  that all callbacks had
+    # been processed.
     #
-    #     E684: list index out of range: 1
+    # However, I can't reproduce this issue anymore.  Why?
+    # Besides,  now, we  don't invoke  this  function from  `exit_cb`, but  from
+    # `close_cb`, because it seems that it gives us this guarantee.
+    #
+    # From `:h close_cb`:
+    #
+    #    > Vim will invoke callbacks that handle data before invoking
+    #    > close_cb, thus when this function is called no more data will
+    #    > be passed to the callbacks.
+    #
+    # But in  `vim-man`, if  we use  `close_cb` instead  of `exit_cb`,  we still
+    # sometimes have an issue where the end of a manpage is truncated.
+    # `sleep 1m` fixes that issue.  Which  probably means that not all callbacks
+    # have been processed when `close_cb` runs it callback.  Why?
+    # Is the explanation given at `:h close_cb`?:
+    #
+    #    > However, if a  callback causes Vim to check for  messages, the close_cb
+    #    > may be  invoked while still  in the  callback.  The plugin  must handle
+    #    > this somehow, it can be useful to know that no more data is coming.
+    #
+    # ---
+    #
+    # If we  add back `sleep 1m`,  it causes Vim to  sleep for about 2  and half
+    # seconds when we use `Locate`.  Why?
     #}}}
-    sleep 1m
     if sourcetype == ''
         return
     endif
@@ -717,6 +776,7 @@ def SetFinalSource(...l: any) #{{{2
     endif
     source_is_being_computed = false
     UpdatePopups()
+    ClearHourGlass()
 enddef
 
 def AppendSource(l: list<dict<string>>) #{{{2
@@ -827,17 +887,12 @@ enddef
 def MaybeUpdatePopups() #{{{2
 # Purpose: Don't update the popups too often while a source is being computed by
 # numerous job callbacks.
-    var current_source_length: number = len(source)
-
-    # if enough lines have been accumulated
-    if current_source_length - last_filtered_line >= SOURCE_CHUNKSIZE
-      # or if there are still some lines to process and the source has not changed since last time
-      || last_filtered_line < current_source_length - 1
-      && last_source_length == current_source_length
+    elapsed += last_time->reltime()->reltimefloat()
+    if elapsed > 0.1
         UpdatePopups()
+        elapsed = 0.0
     endif
-
-    last_source_length = current_source_length
+    last_time = reltime()
 enddef
 
 def UpdatePopups(main_text = true) #{{{2
@@ -845,9 +900,7 @@ def UpdatePopups(main_text = true) #{{{2
         try
             UpdateMainText()
         catch
-            echohl ErrorMsg
-            echom v:exception
-            echohl NONE
+            Error(v:exception)
             # We can't close the popup menu from `Clean()`.{{{
             #
             # It would cause the exit callback  to be invoked, which would cause
@@ -863,6 +916,11 @@ def UpdatePopups(main_text = true) #{{{2
     endif
 
     UpdateMainTitle()
+    # clear the hourglass indicator if we've cleared the filter text by pressing
+    # `C-u` (or `C-h` enough times)
+    if filter_text !~ '\S' && !source_is_being_computed
+        ClearHourGlass()
+    endif
 
     # no need to update the preview while we're moving in the popup with `C-n` and `C-p`
     timer_stop(preview_timer)
@@ -874,10 +932,12 @@ def UpdateMainText() #{{{2
 # update the popup with the new list of lines
     var filter_text_has_changed: bool = filter_text != last_filter_text
     last_filter_text = filter_text
+
     if filter_text_has_changed
         filtered_source = []
         last_filtered_line = -1
         popup_settext(menu_winid, '')
+
     # Bail out if the popup is full, and we haven't type anything yet.{{{
     #
     # The  only reason  to  let the  function  run further,  is  to find  better
@@ -925,8 +985,8 @@ def UpdateMainText() #{{{2
 
     # if we haven't filtered all lines, start a timer to finish the work later
     if new_last_filtered_line < current_source_length - 1
-      # if the source is still being computed, the popups will be updated automatically,
-      # the next time the source is updated
+      # but if the source is still being computed, the popups will be updated automatically,
+      # the next time the source is updated, so no need to do anything then
       && !source_is_being_computed
         timer_stop(popups_update_timer)
         popups_update_timer = timer_start(0, () => UpdatePopups())
@@ -1060,6 +1120,7 @@ def InjectTextProps( #{{{2
 enddef
 
 def UpdateMainTitle() #{{{2
+    var filtered_everything: bool = new_last_filtered_line == len(source) - 1
     # Special case:  no line matches what we've typed so far.
     if line('$', menu_winid) == 1 && getbufline(menu_buf, 1) == ['']
         # Warning: It's important that even if no line matches, the title still respects the format `12/34 (56)`.{{{
@@ -1069,7 +1130,7 @@ def UpdateMainTitle() #{{{2
         # `12/34` with `0/0`; this way, we can  be sure that any space used as a
         # padding is preserved.
         #}}}
-        var newtitle: string = popup_getoptions(menu_winid)
+        var new_title: string = popup_getoptions(menu_winid)
             ->get('title', '')
             # Why do you replace the total?  It seems useless.{{{
             #
@@ -1084,31 +1145,54 @@ def UpdateMainTitle() #{{{2
             # Then, the total won't be updated in the title.
             #}}}
             ->substitute('\d\+/\d\+ ([,0-9]\+)', len(source)->printf('0/0 (%d)'), '')
-        popup_setoptions(menu_winid, {title: newtitle})
+            ->substitute(')\zs [' .. join(HOURGLASS_CHARS, '') .. '] $', '', '')
+            .. ' ' .. HourGlass() .. ' '
+        popup_setoptions(menu_winid, {title: new_title})
         popup_setoptions(preview_winid, {title: ''})
+        if filtered_everything
+            ClearHourGlass()
+        endif
         return
     endif
 
     var curline: number = line('.', menu_winid)
     var lastline: number = line('$', menu_winid)
-    var newtitle: string = popup_getoptions(menu_winid)
+    # In theory, this condition is wrong.{{{
+    #
+    # The filtered  source could have  reached the  limit of the  popup, without
+    # going beyond; in which case, we should not add the `>` symbol.
+    # But in practice, it's good enough.
+    #}}}
+    var too_many: bool = len(filtered_source) == POPUP_MAXLINES
+        || filter_text !~ '\S' && len(source) > POPUP_MAXLINES
+    var new_title: string = popup_getoptions(menu_winid)
         ->get('title', '')
-        ->substitute('\d\+', curline, '')
-        ->substitute('/\zs>\=\d\+', (
-                (
-                # In theory, this condition is wrong.{{{
-                #
-                # The filtered source could have reached the limit of the popup,
-                # without going beyond; in which case, we should not add the `>`
-                # symbol.  But in practice, it's good enough.
-                #}}}
-                len(filtered_source) == POPUP_MAXLINES
-                || filter_text !~ '\S' && len(source) > POPUP_MAXLINES
-                ) ? '>' : ''
-            ) .. lastline,
+        ->substitute('^\s*\d\+\s*', printf('%*s', len(POPUP_MAXLINES), curline) .. ' ', '')
+        ->substitute('/\zs\s*>\=\d\+\s*',
+            ' ' .. (too_many ? '>' : '')
+                .. printf('%-*s', len(POPUP_MAXLINES) + (too_many ? 0 : 1), lastline) .. ' ',
             '')
         ->substitute('(\zs[,0-9]\+\ze)', len(source)->string()->FormatBigNumber(), '')
-    popup_setoptions(menu_winid, {title: newtitle})
+        # We include an hourglass-like indicator in the popup's title.{{{
+        #
+        # We can't simply rely on the numbers growing.
+        # Vim might be  still processing the source without  any number growing.
+        # Or the numbers could be  growing erratically.  For example, right now,
+        # if  we use  `Locate`, and  type `foobarbaz`,  right after  the `z`  is
+        # pressed,  there is  an  unusal long  time  for the  title  to go  from
+        # `1/>100` to the final `1/9`.  We need a more reliable indicator.
+        #}}}
+        ->substitute(')\zs [' .. join(HOURGLASS_CHARS, '') .. '] $', '', '') .. ' ' .. HourGlass() .. ' '
+    popup_setoptions(menu_winid, {title: new_title})
+
+    if filtered_everything
+        ClearHourGlass()
+        # Do *not* inlude a `return` and move this block at the start of the function.{{{
+        #
+        # It would  prevent the title from  updating the index of  the currently
+        # selected entry when there is a non-empty filtering text.
+        #}}}
+    endif
 enddef
 
 def UpdatePreview(timerid = 0) #{{{2
@@ -1394,9 +1478,7 @@ def ExitCallback(type: string, id: number, result: any) #{{{2
         endif
         norm! zv
     catch
-        echohl ErrorMsg
-        echom v:exception
-        echohl NONE
+        Error(v:exception)
     finally
         Clean()
     endtry
@@ -1444,12 +1526,15 @@ def Clean() #{{{2
 enddef
 
 def Reset() #{{{2
+    elapsed = 0.0
     filter_text = ''
     filtered_source = []
     incomplete = ''
+    job_failed = false
+    job_started = false
     last_filter_text = ''
     last_filtered_line = -1
-    last_source_length = -1
+    last_time = []
     menu_buf = -1
     menu_winid = -1
     moving_in_popup = false
@@ -1651,6 +1736,22 @@ def FormatBigNumber(str: string): string #{{{2
     else
         return str[0] .. FormatBigNumber(str[1 :])
     endif
+enddef
+
+def HourGlass(): string #{{{2
+    var char: string = HOURGLASS_CHARS[hourglass_idx]
+    hourglass_idx += 1
+    if hourglass_idx >= len(HOURGLASS_CHARS)
+      hourglass_idx = 0
+    endif
+    return char
+enddef
+
+def ClearHourGlass() #{{{2
+    var new_title: string = popup_getoptions(menu_winid)
+        ->get('title', '')
+        ->substitute(')\zs.*', '', '')
+    popup_setoptions(menu_winid, {title: new_title})
 enddef
 
 def ToggleSelectedRegisterType() #{{{2
