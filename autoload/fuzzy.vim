@@ -47,19 +47,6 @@ var loaded = true
 # use the new feature to get an editable prompt.
 #}}}
 
-# TODO: For each mapping, implement the counterpart Ex command.
-# It would be especially useful for huge sources.
-# For example:
-#
-#     :Files
-#     # too many lines; the plugin is slow, or it bails out
-#
-#     :Files pat
-#     # much fewer lines; the plugin is fast, or at least it doesn't bail out
-#
-# If we supply an  initial pattern to an Ex command, we should  never be able to
-# remove any character from it (be it with `C-u`, `C-h`, `BS`).
-
 # TODO: Implement `:Snippets`.
 #
 #     echo UltiSnips#SnippetsInCurrentScope()
@@ -248,7 +235,7 @@ var source_is_being_computed: bool = false
 var sourcetype: string
 
 # Interface {{{1
-def fuzzy#main(type: string) #{{{2
+def fuzzy#main(type: string, input = '') #{{{2
     # Without this reset, we might wrongly re-use a stale source.{{{
     #
     #     $ cd && vim
@@ -277,6 +264,10 @@ def fuzzy#main(type: string) #{{{2
 
     if UtilityIsMissing()
         return
+    endif
+
+    if input != ''
+        filter_text = input
     endif
 
     var height: number = &lines / 3
@@ -738,7 +729,8 @@ def SetFinalSource(...l: any) #{{{2
     # So, we had to  wait a little to have the guarantee  that all callbacks had
     # been processed.
     #
-    # However, I can't reproduce this issue anymore.  Why?
+    # However, I can't reproduce this issue anymore.  **Why?**
+    #
     # Besides,  now, we  don't invoke  this  function from  `exit_cb`, but  from
     # `close_cb`, because it seems that it gives us this guarantee.
     #
@@ -751,7 +743,7 @@ def SetFinalSource(...l: any) #{{{2
     # But in  `vim-man`, if  we use  `close_cb` instead  of `exit_cb`,  we still
     # sometimes have an issue where the end of a manpage is truncated.
     # `sleep 1m` fixes that issue.  Which  probably means that not all callbacks
-    # have been processed when `close_cb` runs it callback.  Why?
+    # have been processed when `close_cb` runs it callback.  **Why?**
     # Is the explanation given at `:h close_cb`?:
     #
     #    > However, if a  callback causes Vim to check for  messages, the close_cb
@@ -760,8 +752,19 @@ def SetFinalSource(...l: any) #{{{2
     #
     # ---
     #
-    # If we  add back `sleep 1m`,  it causes Vim to  sleep for about 2  and half
-    # seconds when we use `Locate`.  Why?
+    # If we add back `sleep 1m`, and:
+    #
+    #    - we use `exit_cb` instead of `close_cb`
+    #    - we press `SPC fl` (`Locate`)
+    #
+    # it causes Vim to sleep for more than 2 seconds.  **Why?**
+    #
+    # If we add back `sleep 1m`, and:
+    #
+    #    - we use `close_cb` instead of `exit_cb`
+    #    - we press `SPC fl` (`Locate`)
+    #
+    # it causes Vim to sleep for about 70ms.  **Why?**
     #}}}
     if sourcetype == ''
         return
