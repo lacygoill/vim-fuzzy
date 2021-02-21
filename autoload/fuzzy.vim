@@ -78,6 +78,7 @@ var loaded = true
 # TODO: Implement `:FzBuffers`; open buffers.
 # TODO: Implement `:FzGFiles?`; git files; `git status`.
 # TODO: Implement `:FzGFiles`; git files; `git ls-files`.
+# TODO: Implement `:FzGGrep`; for `git grep`.
 # TODO: Implement `:FzHighlight`; highlight groups.
 # TODO: Implement `:FzMan`; man pages.
 # TODO: Implement `:FzMarks`.
@@ -148,7 +149,7 @@ const HOURGLASS_CHARS: list<string> = ['―', '\', '|', '/']
 # in the filter  text might increase the  number of matches (e.g. from  0 to 1),
 # which is jarring.
 #}}}
-const MIN_SCORE = 50
+const MIN_SCORE: number = 50
 
 # There is no need to display *all* the filtered lines in the popup.{{{
 #
@@ -204,7 +205,7 @@ const SOURCE_CHUNKSIZE: number = 10'000
 const TEXTWIDTH: number = 80
 
 # if we get an absurdly huge source, we should bail out
-const TOO_BIG = 2'000'000
+const TOO_BIG: number = 2'000'000
 
 const UPDATEPREVIEW_WAITINGTIME: number = 50
 
@@ -439,7 +440,7 @@ def InitCommandsOrMappings() #{{{2
         # split after every "Last set from ..." line
         ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
         # transform each pair of lines into a dictionary
-        ->mapnew((_, v) => ({
+        ->mapnew((_, v: string): dict<string> => ({
             text: matchstr(v, relevant)->substitute(noise, '', ''),
             # `matchstr()` extracts the filename.{{{
             #
@@ -468,13 +469,15 @@ def InitCommandsOrMappings() #{{{2
 
     # align all the names of commands/mappings in a field (max 35 cells)
     var longest_name: number = mapnew(source,
-            (_, v) => v.text->matchstr('^\S*')->strchars(true))
+            (_, v: dict<string>): number => v.text->matchstr('^\S*')->strchars(true))
         ->max()
     longest_name = min([35, longest_name])
-    source->map((_, v) => extend(v, {
-        text: matchstr(v.text, '^\S*')->printf('%-' .. longest_name .. 'S')
-            .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
-        }))
+    source
+        ->map((_, v: dict<string>): dict<string> =>
+            extend(v, {
+                text: matchstr(v.text, '^\S*')->printf('%-' .. longest_name .. 'S')
+                    .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
+                }))
 enddef
 
 def InitHelpTags() #{{{2
@@ -557,7 +560,7 @@ def InitHelpTags() #{{{2
     #        ^--------------------------^
     #}}}
     var shellpipeline: string = 'grep -H ".*" '
-        .. map(tagfiles, (_, v) => shellescape(v))
+        .. map(tagfiles, (_, v: string): string => shellescape(v))
             ->sort()
             ->uniq()
             ->join()
@@ -575,13 +578,14 @@ enddef
 
 def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
-        + copy(v:oldfiles)->filter((_, v) => ExpandTilde(v)->filereadable())
-    map(recentfiles, (_, v) => fnamemodify(v, ':p'))
+        + copy(v:oldfiles)
+            ->filter((_, v: string): bool => ExpandTilde(v)->filereadable())
+    map(recentfiles, (_, v: string): string => fnamemodify(v, ':p'))
     var curbuf: string = expand('%:p')
     source = recentfiles
-        ->filter((_, v) => v != '' && v != curbuf && !isdirectory(v))
+        ->filter((_, v: string): bool => v != '' && v != curbuf && !isdirectory(v))
         ->Uniq()
-        ->mapnew((_, v) => ({
+        ->mapnew((_, v: string): dict<string> => ({
             text: fnamemodify(v, ':~:.'),
             trailer: '',
             location: ''
@@ -593,9 +597,9 @@ def InitRegisters() #{{{2
         ->split('\n')[1 :]
         # trim leading whitespace  (useful to filter based on  type; e.g. typing
         # `^b` will leave only blockwise registers)
-        ->map((_, v) => substitute(v, '^\s\+', '', ''))
-        ->mapnew((_, v) => matchlist(v, '^\(\S  "\S   \)\(.*\)'))
-        ->mapnew((_, v) => ({text: v[2], header: v[1], trailer: '', location: ''}))
+        ->map((_, v: string): string => substitute(v, '^\s\+', '', ''))
+        ->mapnew((_, v: string): list<string> => matchlist(v, '^\(\S  "\S   \)\(.*\)'))
+        ->mapnew((_, v: list<string>): dict<string> => ({text: v[2], header: v[1], trailer: '', location: ''}))
 enddef
 
 def Job_start(cmd: string) #{{{2
@@ -700,14 +704,14 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
             # That shouldn't  be too costly  now that we  limit the size  of the
             # popup buffer.
             #}}}
-            ->mapnew((_, v) => ({text: v, trailer: '', location: ''}))
+            ->mapnew((_, v: string): dict<string> => ({text: v, trailer: '', location: ''}))
             ->AppendSource()
     # TODO: For `Grep`, our filtering text is also matched against the filepath.
     # It should only be matched against real text.
     else
         splitted_data
-            ->mapnew((_, v) => split(v, '\t'))
-            ->mapnew((_, v) => ({text: v[0], trailer: v[1], location: ''}))
+            ->mapnew((_, v: string): list<string> => split(v, '\t'))
+            ->mapnew((_, v: list<string>): dict<string> => ({text: v[0], trailer: v[1], location: ''}))
             ->AppendSource()
     endif
     BailOutIfTooBig()
@@ -1034,8 +1038,16 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
             # Otherwise,  we  might  get  more matches  after  adding  a  second
             # character in the filtering text, which is jarring.
             #}}}
-            ->filter(strlen(filter_text) <= 1 ? (_, v) => v.score > 0 : (_, v) => v.score > MIN_SCORE)
-            ->sort((a, b) => a.score == b.score ? 0 : a.score > b.score ? -1 : 1)
+            ->filter(strlen(filter_text) <= 1
+                ? (_, v: dict<any>): bool => v.score > 0
+                : (_, v: dict<any>): bool => v.score > MIN_SCORE
+                )
+            ->sort((a: dict<any>, b: dict<any>): number => a.score == b.score
+                ?     0
+                : a.score > b.score
+                ?    -1
+                :     1
+                )
             ->slice(0, POPUP_MAXLINES)
 
         return filtered_source
@@ -1053,7 +1065,7 @@ def InjectTextProps( #{{{2
     ): func(number, dict<any>): dict<any>
 
     if filter_text !~ '\S' && sourcetype !~ '^Registers'
-        return (_, v: dict<string>) => ({
+        return (_, v: dict<string>): dict<any> => ({
             text: v.text .. "\t" .. v.trailer,
             props: [{
                 col: v.text->strlen() + 1,
@@ -1064,7 +1076,7 @@ def InjectTextProps( #{{{2
             })
 
     elseif filter_text !~ '\S' && sourcetype =~ '^Registers'
-        return (_, v: dict<string>) => ({
+        return (_, v: dict<string>): dict<any> => ({
             header: v.header,
             text: v.header .. v.text .. "\t" .. v.trailer,
             props: [{
@@ -1080,9 +1092,9 @@ def InjectTextProps( #{{{2
             })
 
     elseif filter_text =~ '\S' && sourcetype !~ '^Registers'
-        return (i: number, v: dict<any>) => ({
+        return (i: number, v: dict<any>): dict<any> => ({
             text: v.text .. "\t" .. v.trailer,
-            props: mapnew(pos[i], (_, w: number) => ({
+            props: mapnew(pos[i], (_, w: number): dict<any> => ({
                 col: w + 1,
                 length: 1,
                 type: 'fuzzyMatch'
@@ -1097,10 +1109,10 @@ def InjectTextProps( #{{{2
             })
 
     elseif filter_text =~ '\S' && sourcetype =~ '^Registers'
-        return (i: number, v: dict<any>) => ({
+        return (i: number, v: dict<any>): dict<any> => ({
             header: v.header,
             text: v.header .. v.text .. "\t" .. v.trailer,
-            props: mapnew(pos[i], (_, w: number) => ({
+            props: mapnew(pos[i], (_, w: number): dict<any> => ({
                 col: w + 1 + strlen(v.header),
                 length: 1,
                 type: 'fuzzyMatch'
@@ -1612,13 +1624,18 @@ def BuflistedSorted(): list<string> #{{{2
     # was active, but on the last time it was changed.
     #}}}
     return getbufinfo({buflisted: true})
-        ->filter((_, v) => getbufvar(v.bufnr, '&buftype', '') == '')
-        ->map((_, v) => ({bufnr: v.bufnr, lastused: v.lastused}))
+        ->filter((_, v: dict<any>): bool => getbufvar(v.bufnr, '&buftype', '') == '')
+        ->map((_, v: dict<any>): dict<number> => ({bufnr: v.bufnr, lastused: v.lastused}))
         # the most recently active buffers first;
         # for 2 buffers accessed in the same second, the one with the bigger number first
         # (because it's the most recently created one)
-        ->sort((a, b) => a.lastused < b.lastused ? 1 : a.lastused == b.lastused ? b.bufnr - a.bufnr : -1)
-        ->mapnew((_, v) => bufname(v.bufnr))
+        ->sort((a: dict<number>, b: dict<number>): number => a.lastused < b.lastused
+            ?     1
+            : a.lastused == b.lastused
+            ?     b.bufnr - a.bufnr
+            :     -1
+            )
+        ->mapnew((_, v: dict<number>): string => bufname(v.bufnr))
 enddef
 
 def Uniq(list: list<string>): list<string> #{{{2
@@ -1640,15 +1657,15 @@ def GetFindCmd(): string #{{{2
     # ignore files whose name is present in `'wildignore'` (e.g. `tags`)
     var by_name: string = tokens
         ->copy()
-        ->filter((_, v) => v !~ '[/*]')
-        ->map((_, v) => '-iname ' .. shellescape(v) .. ' -o')
+        ->filter((_, v: string): bool => v !~ '[/*]')
+        ->map((_, v: string): string => '-iname ' .. shellescape(v) .. ' -o')
         ->join()
 
     # ignore files whose extension is present in `'wildignore'` (e.g. `*.mp3`)
     var by_extension: string = tokens
         ->copy()
-        ->filter((_, v) => v =~ '\*' && v !~ '/')
-        ->map((_, v) => '-iname ' .. shellescape(v) .. ' -o')
+        ->filter((_, v: string): bool => v =~ '\*' && v !~ '/')
+        ->map((_, v: string): string => '-iname ' .. shellescape(v) .. ' -o')
         ->join()
 
     # ignore files whose directory is present in `'wildignore'` (e.g. `*/build/*`)
@@ -1662,8 +1679,8 @@ def GetFindCmd(): string #{{{2
     var cwd: string = getcwd()
     var by_directory: string = tokens
         ->copy()
-        ->filter((_, v) => v =~ '/')
-        ->map((_, v) => '-ipath '
+        ->filter((_, v: string): bool => v =~ '/')
+        ->map((_, v: string): string => '-ipath '
             # Why replacing the current working directory with a dot?{{{
             #
             #     $ mkdir -p /tmp/test \
@@ -1726,7 +1743,9 @@ def FormatBigNumber(str: string): string #{{{2
     #     def FormatBigNumber(str: string): string
     #         return split(str, '\zs')
     #             ->reverse()
-    #             ->reduce((a, v) => substitute(a, ',', '', 'g')->len() % 3 == 2 ? ',' .. v .. a : v .. a)
+    #             ->reduce((a: string, v: string): string =>
+    #                 substitute(a, ',', '', 'g')->len() % 3 == 2 ? ',' .. v .. a : v .. a
+    #                 )
     #             ->trim(',', 0)
     #     enddef
     #
