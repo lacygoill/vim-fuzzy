@@ -1028,7 +1028,7 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
             ->slice(0, POPUP_MAXLINES)
             # No need to process *all* the matches.
             # The popup can only display a limited amount of them.
-            ->mapnew(InjectTextProps(filter_text, pos, scores))
+            ->mapnew(InjectTextProps(pos, scores))
         # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
         # works as expected later (i.e. can determine which entry we've chosen).
         filtered_source += matches
@@ -1059,7 +1059,6 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
 enddef
 
 def InjectTextProps( #{{{2
-    filter_text = '',
     pos: list<list<number>> = [],
     scores: list<number> = []
     ): func(number, dict<any>): dict<any>
