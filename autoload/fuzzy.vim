@@ -51,6 +51,10 @@ var loaded = true
 #
 #     echo UltiSnips#SnippetsInCurrentScope()
 
+# TODO: It  would  be convenient  to  be  able  to  scroll horizontally  on  the
+# currently selected line (e.g. with `M-h` and `M-l`).
+# Useful if it's too long to fit entirely on 1 screen line.
+
 # TODO: Implement a mechanism which lets us mark multiple lines in the popup.
 # Use the sign column to display a sign besides any marked line.
 
@@ -149,7 +153,7 @@ const HOURGLASS_CHARS: list<string> = ['―', '\', '|', '/']
 # in the filter  text might increase the  number of matches (e.g. from  0 to 1),
 # which is jarring.
 #}}}
-const MIN_SCORE: number = 50
+const MIN_SCORE: number = -5000
 
 # There is no need to display *all* the filtered lines in the popup.{{{
 #
@@ -379,7 +383,13 @@ def InitSource() #{{{2
         Job_start(cmd)
 
     elseif sourcetype == 'HelpTags'
-        InitHelpTags()
+        # The shell command might take too long.  Let's start it asynchronously.{{{
+        #
+        # Right now, it takes about `.17s` which doesn't seem a lot.
+        # But it's  noticeable; too  much for a  tool like a  fuzzy finder.
+        # Besides, this duration might be longer on another machine.
+        #}}}
+        GetHelpTagsCmd()->Job_start()
 
     elseif sourcetype == 'Locate'
         Job_start('locate /')
@@ -482,7 +492,7 @@ def InitCommandsOrMappings() #{{{2
         }))
 enddef
 
-def InitHelpTags() #{{{2
+def GetHelpTagsCmd(): string #{{{2
     var tagfiles: list<string> = globpath(&rtp, 'doc/tags', true, true)
 
     # What's the purpose of this formatting command?{{{
@@ -570,13 +580,7 @@ def InitHelpTags() #{{{2
         .. ' | ' .. formatting_cmd
         .. ' | sort'
 
-    # The shell command might take too long.  Let's start it asynchronously.{{{
-    #
-    # Right now, it takes about `.17s` which doesn't seem a lot.
-    # But it's  noticeable; too  much for a  tool like a  fuzzy finder.
-    # Besides, this duration might be longer on another machine.
-    #}}}
-    Job_start(shellpipeline)
+    return shellpipeline
 enddef
 
 def InitRecentFiles() #{{{2
@@ -596,27 +600,18 @@ def InitRecentFiles() #{{{2
 enddef
 
 def InitRegisters() #{{{2
-    # TODO: `:reg` truncates the contents up to a screen line.{{{
-    #
-    # Use `getreg()` instead to get the full contents.
-    #
-    # ---
-    #
-    # But that creates another issue.
-    # When our filter text  will match some text which is  beyond 1 screen line,
-    # it won't be visible.  We should have some logic to display a line from the
-    # first  matched character  (or a  few characters  before to  get some  more
-    # context).  And add `...` before (and after if necessary).
-    #}}}
+    # We use `:reg` to get the names of all registers.
+    # But  we  still  use  `getreg()`  to get  their  contents,  because  `:reg`
+    # truncates them after one screen line.
     source = execute('reg')
-        ->split('\n')[1 :]
-        ->mapnew((_, v: string): list<string> =>
-                # trim leading whitespace  (useful to filter based on  type; e.g. typing
-                # `^b` will leave only blockwise registers)
-                v->substitute('^\s\+', '', '')
-                 ->matchlist('^\(\S  "\S   \)\(.*\)')
-        )->mapnew((_, v: list<string>): dict<string> =>
-                    ({text: v[2], header: v[1], trailer: '', location: ''}))
+       ->split('\n')[1 :]
+       ->map((_, v: string): string => matchstr(v, '^  [lbc]  "\zs\S'))
+       ->mapnew((_, v: any): dict<string> => ({
+           text: getreg(v, true, true)->join('^J'),
+           header: printf('%s  "%s   ', {v: 'c', V: 'l'}->get(getregtype(v), 'b'), v),
+           trailer: '',
+           location: '',
+           }))
 enddef
 
 def Job_start(cmd: string) #{{{2
@@ -711,7 +706,15 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
     # typed text  to be matched against  the filename.  Otherwise, we  might get
     # too many irrelevant results (test with the pattern "changes").
     #}}}
-    if sourcetype == 'Files' || sourcetype == 'Locate' || sourcetype == 'Grep'
+    if sourcetype == 'HelpTags'
+        splitted_data
+            ->mapnew((_, v: string): list<string> => split(v, '\t'))
+            ->mapnew((_, v: list<string>): dict<string> =>
+                        ({text: v[0], trailer: v[1], location: ''}))
+            ->AppendSource()
+    else
+        # TODO: For `Grep`, our filtering text is also matched against the filepath.
+        # It should only be matched against real text.
         splitted_data
             # TODO: How faster would be our code without this `map()`, on huge sources?{{{
             #
@@ -723,14 +726,6 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
             #}}}
             ->mapnew((_, v: string): dict<string> =>
                         ({text: v, trailer: '', location: ''}))
-            ->AppendSource()
-    # TODO: For `Grep`, our filtering text is also matched against the filepath.
-    # It should only be matched against real text.
-    else
-        splitted_data
-            ->mapnew((_, v: string): list<string> => split(v, '\t'))
-            ->mapnew((_, v: list<string>): dict<string> =>
-                        ({text: v[0], trailer: v[1], location: ''}))
             ->AppendSource()
     endif
     BailOutIfTooBig()
@@ -794,11 +789,11 @@ def SetFinalSource(...l: any) #{{{2
     endif
     # the last line of the shell ouput ends with an undesirable trailing newline
     incomplete = incomplete->trim("\<NL>", 2)
-    if sourcetype == 'Files' || sourcetype == 'Locate' || sourcetype == 'Grep'
-        [{text: incomplete, trailer: '', location: ''}]->AppendSource()
-    else
+    if sourcetype == 'HelpTags'
         var parts: list<string> = split(incomplete, '\t')
         [{text: parts[0], trailer: parts[1], location: ''}]->AppendSource()
+    else
+        [{text: incomplete, trailer: '', location: ''}]->AppendSource()
     endif
     source_is_being_computed = false
     UpdatePopups()
@@ -832,7 +827,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
 
     # erase only one character from the filter text
     elseif key == "\<bs>" || key == "\<c-h>"
-        if len(filter_text) >= 1
+        if strlen(filter_text) >= 1
             filter_text = filter_text[: -2]
             UpdatePopups()
         endif
@@ -1000,7 +995,59 @@ def UpdateMainText() #{{{2
     var lines: list<dict<string>> = source[
         last_filtered_line + 1 : new_last_filtered_line
         ]
-    var popup_lines: list<dict<any>> = FilterAndHighlight(lines)
+    var popup_lines: list<dict<any>> = lines
+        ->FilterAndHighlight()
+        # TODO: If our filter text matches some text which is beyond 1 screen line, it's not visible.{{{
+        #
+        #     some very very very long text MATCH yet another very very very very long text
+        #
+        # We should display something like this:
+        #
+        #     ... very long text MATCH yet another very ...
+        #
+        # If you  can display  all matched characters,  center them;  i.e. there
+        # should be  as many  non-matching characters  before the  first matched
+        # character  than  there  are  non-matching characters  after  the  last
+        # matched character.
+        #
+        # Otherwise, try to display as many of them as possible.
+        #
+        # ---
+        #
+        # Issue: We probably want to always display the header no matter what.
+        #
+        # ---
+        #
+        # Test:
+        #
+        #     $ vim -i NONE /tmp/file +'let [@+, @*] = ["", ""]' +'norm! 1G"ayy' +'norm! 2G"byy' +'norm! 3G"cyy' +'norm! 4G"dyy'
+        #
+        # Where `/tmp/file` contains this:
+        #
+        #     xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx aaa xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx
+        #     xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx aba xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx
+        #     xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx abc xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx
+        #     xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx aca xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx xxx
+        #
+        # Then, type `" C-f abc`.
+        # Only the `"c` register should remain.  And the `abc` match should be visible.
+        #
+        # ---
+        #
+        # Tip: To check how `fzf(1)` handles this issue, try this:
+        #
+        #     $ locate / | fzf
+        #     # type "aka"
+        #
+        # Right now "aka" matches this filename:
+        #
+        #     ~/.vim/tmp/undo/%home%jean%Downloads%XDCC%The Expanse - Complete Season 1 S01 - 720p HDTV x264%Episodes%Subtitles%The Expanse - S01 E04 - CQB aka Close Quarters Battle.srt
+        #
+        # Which is the longest filename on our system; found with:
+        #
+        #     $ find / 2>/dev/null | awk -F/ 'BEGIN {maxlength = 0; longest = "" } length( $NF ) > maxlength { maxlength = length( $NF ); longest = $NF } END { print "longest was", longest, "at", maxlength, "characters." }'
+        #}}}
+        ->CenterMatch()
     # Don't try to append lines in the popup.{{{
     #
     # We  really want  to reset  the  entire popup  every  time a  new chunk  is
@@ -1052,16 +1099,27 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
         # works as expected later (i.e. can determine which entry we've chosen).
         filtered_source += matches
         filtered_source = filtered_source
-            # Don't use `MIN_SCORE` when we've only typed a single character.{{{
+            # Don't filter anything when when we've only typed a single character.{{{
             #
             # Otherwise,  we  might  get  more matches  after  adding  a  second
             # character in the filtering text, which is jarring.
             #}}}
-            ->filter(strlen(filter_text) <= 1
-                ? (_, v: dict<any>): bool => v.score > 0
-                : (_, v: dict<any>): bool => v.score > MIN_SCORE)
-            ->sort((a: dict<any>, b: dict<any>): number =>
-                        a.score == b.score
+            # Same thing for registers.{{{
+            #
+            # If the filtering text is far  from the start of a string register,
+            # the score might be very low (e.g. `-123`).
+            # It will probably  be lower than `MIN_SCORE`; but we  don't want to
+            # ignore it.
+            #
+            # If you  wonder why registers  are a  special case, I  think that's
+            # because they can contain huge  strings.  Other sources are usually
+            # composed of short strings (e.g. filenames).
+            #}}}
+            ->filter(strlen(filter_text) <= 1 || sourcetype =~ '^Registers'
+                ?     (_, v: dict<any>): bool => true
+                :     (_, v: dict<any>): bool => v.score > MIN_SCORE
+            )->sort((a: dict<any>, b: dict<any>): number =>
+                          a.score == b.score
                         ?     0
                         : a.score > b.score
                         ?    -1
@@ -1074,6 +1132,10 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
             ->slice(0, POPUP_MAXLINES)
             ->mapnew(InjectTextProps())
     endif
+enddef
+
+def CenterMatch(lines: list<dict<any>>): list<dict<any>> #{{{2
+    return lines
 enddef
 
 def InjectTextProps( #{{{2
@@ -1298,9 +1360,7 @@ def ExtractInfo(line: string): dict<string> #{{{3
         if splitted->len() != 1
             return {}
         else
-            return {
-                filename: splitted[0]->ExpandTilde()->fnamemodify(':p'),
-                }
+            return {filename: splitted[0]->ExpandTilde()->fnamemodify(':p')}
         endif
     elseif sourcetype == 'HelpTags'
         return {
@@ -1766,7 +1826,7 @@ def FormatBigNumber(str: string): string #{{{2
     #         return split(str, '\zs')
     #             ->reverse()
     #             ->reduce((a: string, v: string): string =>
-    #                         a->substitute(',', '', 'g')->len() % 3 == 2
+    #                         a->substitute(',', '', 'g')->strlen() % 3 == 2
     #                             ?     ',' .. v .. a
     #                             :     v .. a
     #             )->trim(',', 0)
@@ -1774,9 +1834,9 @@ def FormatBigNumber(str: string): string #{{{2
     #
     # Note: It's much slower.
     #}}}
-    if len(str) <= 3
+    if strlen(str) <= 3
         return str
-    elseif len(str) % 3 == 1
+    elseif strlen(str) % 3 == 1
         return str[0] .. ',' .. FormatBigNumber(str[1 :])
     else
         return str[0] .. FormatBigNumber(str[1 :])
