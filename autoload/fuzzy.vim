@@ -297,10 +297,10 @@ def fuzzy#main(type: string, input = '') #{{{2
     endif
 
     popup_width = min([TEXTWIDTH, &columns - BORDERS])
-    var line: number = &lines - &ch - statusline - height - 1
+    var lnum: number = &lines - &ch - statusline - height - 1
 
     var opts: dict<any> = {
-        line: line,
+        line: lnum,
         col: (&columns - TEXTWIDTH - BORDERS) / 2,
         pos: 'topleft',
         maxheight: height,
@@ -480,7 +480,7 @@ def InitCommandsOrMappings() #{{{2
     # align all the names of commands/mappings in a field (max 35 cells)
     var longest_name: number = source
         ->mapnew((_, v: dict<string>): number =>
-            matchstr(v.text, '^\S*')->strchars(true))
+            matchstr(v.text, '^\S*')->strcharlen())
         ->max()
     longest_name = min([35, longest_name])
     source
@@ -659,7 +659,7 @@ def Job_start(cmd: string) #{{{2
     if job_status(myjob) == 'fail'
         # shorten message to avoid a hit-enter prompt
         var msg: string = printf('[vim-fuzzy] Failed to run:  %s', cmd)
-        if strchars(msg, true) > (v:echospace + (&cmdheight - 1) * &columns)
+        if strcharlen(msg) > (v:echospace + (&cmdheight - 1) * &columns)
             var n: number = v:echospace - 3
             var n1: number = n % 2 ? n / 2 : n / 2 - 1
             var n2: number = n / 2
@@ -1411,13 +1411,13 @@ def PreviewHighlight(info: dict<string>) #{{{3
     var filename: string
     var lnum: string
     var tagname: string
-    if has_key(info, 'filename')
+    if info->has_key('filename')
         filename = info.filename
     endif
-    if has_key(info, 'lnum')
+    if info->has_key('lnum')
         lnum = info.lnum
     endif
-    if has_key(info, 'tagname')
+    if info->has_key('tagname')
         tagname = info.tagname
     endif
 
@@ -1721,7 +1721,7 @@ def Uniq(list: list<string>): list<string> #{{{2
     var visited: dict<number>
     var ret: list<string>
     for path in list
-        if !empty(path) && !has_key(visited, path)
+        if !empty(path) && !visited->has_key(path)
             add(ret, path)
             visited[path] = 1
         endif
