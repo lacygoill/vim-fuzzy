@@ -213,7 +213,7 @@ const TOO_BIG: number = 2'000'000
 
 const UPDATEPREVIEW_WAITINGTIME: number = 50
 
-# Init {{{1
+# Declarations {{{1
 
 var elapsed: float
 var filter_text: string = ''
@@ -271,6 +271,44 @@ def fuzzy#main(type: string, input = '') #{{{2
         return
     endif
 
+    if &bt == 'terminal' && win_gettype() == 'popup'
+        # We cannot interact with a popup menu while a popup terminal is active.{{{
+        #
+        #     vim9script
+        #     term_start(&shell, {hidden: true})
+        #         ->popup_create({
+        #             border: [],
+        #             maxheight: &lines / 3,
+        #             minheight: &lines / 3,
+        #             zindex: 50 - 1,
+        #         })
+        #     range(&lines - 5)
+        #         ->mapnew((_, v) => string(v))
+        #         ->popup_create({
+        #             cursorline: true,
+        #             filter: 'popup_filter_menu',
+        #             mapping: true,
+        #         })
+        #
+        # In Terminal-Job mode, pressing `j` and `k` doesn't scroll in the popup
+        # menu, even  though the latter is  displayed above (thanks to  a higher
+        # `zindex`); instead,  the keys are  sent to the running  job (typically
+        # the shell).
+        #
+        # In Terminal-Normal mode, pressing `j`  and `k` still doesn't scroll in
+        # the popup  menu; instead,  they are used  for the  terminal scrollback
+        # buffer.
+        #
+        # This  is confusing.   Besides,  `popup_menu()` automatically  disables
+        # mappings   (it's  as   if   you  had   passed   `mapping:  false`   to
+        # `popup_create()`);  this  breaks  the  dynamic  colors  of  our  popup
+        # terminal,  because pressing  `i`  to enter  Terminal-Job mode  doesn't
+        # trigger anymore our custom mapping which fires `User TermEnter`.
+        #}}}
+        Error('vim-fuzzy: Cannot start while a popup terminal is active')
+        return
+    endif
+
     if input != ''
         filter_text = input
     endif
@@ -323,18 +361,18 @@ def fuzzy#main(type: string, input = '') #{{{2
         scrollbar: false,
         filter: PopupFilter,
         callback: function(ExitCallback, [sourcetype]),
-        }
+    }
 
     # create popup menu
     menu_winid = popup_menu('', opts)
     menu_buf = winbufnr(menu_winid)
-    prop_type_add('fuzzyMatch', {bufnr: menu_buf, highlight: 'Title'})
-    prop_type_add('fuzzyHeader', {bufnr: menu_buf, highlight: 'Comment'})
-    prop_type_add('fuzzyTrailer', {bufnr: menu_buf, highlight: 'Comment'})
+    prop_type_add('fuzzyMatch', {bufnr: menu_buf, highlight: 'Title', combine: false})
+    prop_type_add('fuzzyHeader', {bufnr: menu_buf, highlight: 'Comment', combine: false})
+    prop_type_add('fuzzyTrailer', {bufnr: menu_buf, highlight: 'Comment', combine: false})
 
     # create preview
     opts = popup_getoptions(menu_winid)
-    opts.line = opts.line - (height + BORDERS / 2)
+    opts.line -= (height + BORDERS / 2)
     remove(opts, 'callback')
     remove(opts, 'cursorline')
     remove(opts, 'filter')
@@ -425,7 +463,7 @@ def InitCommandsOrMappings() #{{{2
         #                │    └ Address
         #                └ Args
         #}}}
-        noise = '^\S*\zs.*\ze\%43c.*'
+        noise = '^\S*\zs.*\%43c'
 
     elseif sourcetype =~ '^Mappings'
         cmd = 'verb ' .. sourcetype[-2]->tolower() .. 'map'
@@ -467,7 +505,7 @@ def InitCommandsOrMappings() #{{{2
             # I don't know whether it would be still too costly.
             #}}}
             location: matchstr(v, 'Last set from .* line \d\+$'),
-            }))
+        }))
 
     if sourcetype == 'Commands'
         # Remove heading:{{{
@@ -560,7 +598,7 @@ def GetHelpTagsCmd(): string #{{{2
                 printf("%-40s\t%s\n", a[1], a[2]);
             }
         END
-        formatting_cmd = 'awk ' .. join(awkpgm, '')->shellescape()
+        formatting_cmd = 'awk ' .. awkpgm->join('')->shellescape()
     endif
 
     # No need to use `rg(1)`; `grep(1)` is faster here.{{{
@@ -596,7 +634,7 @@ def InitRecentFiles() #{{{2
             text: fnamemodify(v, ':~:.'),
             trailer: '',
             location: ''
-            }))
+        }))
 enddef
 
 def InitRegisters() #{{{2
@@ -611,7 +649,7 @@ def InitRegisters() #{{{2
            header: printf('%s  "%s   ', {v: 'c', V: 'l'}->get(getregtype(v), 'b'), v),
            trailer: '',
            location: '',
-           }))
+        }))
 enddef
 
 def Job_start(cmd: string) #{{{2
@@ -653,7 +691,7 @@ def Job_start(cmd: string) #{{{2
         #
         # Should we change some of our options?
         #}}}
-        })
+    })
     job_started = true
 
     if job_status(myjob) == 'fail'
@@ -667,12 +705,12 @@ def Job_start(cmd: string) #{{{2
         endif
         # even though the message is shortened, we still get a weird hit-enter prompt;
         # delaying the message fixes the issue
-        timer_start(0, () => Error(msg))
+        timer_start(0, (_) => Error(msg))
         job_failed = true
     endif
 enddef
 
-def SetIntermediateSource(_c: channel, argdata: string) #{{{2
+def SetIntermediateSource(_, argdata: string) #{{{2
     # We don't have the guarantee that when this async function will be called, we still have a source to process.{{{
     #
     # We  might have  interrupted  the job  one way  or  another (`ESC`,  `C-c`,
@@ -731,7 +769,7 @@ def SetIntermediateSource(_c: channel, argdata: string) #{{{2
     BailOutIfTooBig()
 enddef
 
-def SetFinalSource(...l: any) #{{{2
+def SetFinalSource(_) #{{{2
     # TODO: In the past we needed a `sleep 1m` here.{{{
     #
     # That was necessary to avoid an error raised when evaluating `parts[1]`:
@@ -851,8 +889,10 @@ def PopupFilter(id: number, key: string): bool #{{{2
 
         moving_in_popup = true
         timer_stop(moving_in_popup_timer)
-        moving_in_popup_timer = timer_start(UPDATEPREVIEW_WAITINGTIME,
-            () => execute('moving_in_popup = false'))
+        moving_in_popup_timer = UPDATEPREVIEW_WAITINGTIME
+            ->timer_start((_) => {
+                moving_in_popup = false
+            })
 
         var cmd: string = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
         win_execute(menu_winid, cmd)
@@ -991,10 +1031,10 @@ def UpdateMainText() #{{{2
     new_last_filtered_line = min([
         last_filtered_line + SOURCE_CHUNKSIZE,
         current_source_length - 1
-        ])
+    ])
     var lines: list<dict<string>> = source[
         last_filtered_line + 1 : new_last_filtered_line
-        ]
+    ]
     var popup_lines: list<dict<any>> = lines
         ->FilterAndHighlight()
         # TODO: If our filter text matches some text which is beyond 1 screen line, it's not visible.{{{
@@ -1062,7 +1102,7 @@ def UpdateMainText() #{{{2
       # the next time the source is updated, so no need to do anything then
       && !source_is_being_computed
         timer_stop(popups_update_timer)
-        popups_update_timer = timer_start(0, () => UpdatePopups())
+        popups_update_timer = timer_start(0, (_) => UpdatePopups())
     endif
 
     # Rationale:{{{
@@ -1141,7 +1181,7 @@ enddef
 def InjectTextProps( #{{{2
     pos: list<list<number>> = [],
     scores: list<number> = []
-    ): func(number, dict<any>): dict<any>
+): func(number, dict<any>): dict<any>
 
     if filter_text !~ '\S' && sourcetype !~ '^Registers'
         return (_, v: dict<string>): dict<any> => ({
@@ -1152,7 +1192,7 @@ def InjectTextProps( #{{{2
                       type: 'fuzzyTrailer',
                     }],
             location: v.location,
-            })
+        })
 
     elseif filter_text !~ '\S' && sourcetype =~ '^Registers'
         return (_, v: dict<string>): dict<any> => ({
@@ -1185,7 +1225,7 @@ def InjectTextProps( #{{{2
                        }],
             location: v.location,
             score: scores[i]
-            })
+        })
 
     elseif filter_text =~ '\S' && sourcetype =~ '^Registers'
         return (i: number, v: dict<any>): dict<any> => ({
@@ -1207,10 +1247,10 @@ def InjectTextProps( #{{{2
                          type: 'fuzzyTrailer',
                        }],
             score: scores[i],
-            })
+        })
     endif
 
-    return (_, __) => ({})
+    return (_, _) => ({})
 enddef
 
 def UpdateMainTitle() #{{{2
@@ -1239,7 +1279,7 @@ def UpdateMainTitle() #{{{2
             # Then, the total won't be updated in the title.
             #}}}
             ->substitute('\d\+/\d\+ ([,0-9]\+)', len(source)->printf('0/0 (%d)'), '')
-            ->substitute(')\zs [' .. join(HOURGLASS_CHARS, '') .. '] $', '', '')
+            ->substitute(')\zs [' .. HOURGLASS_CHARS->join('') .. '] $', '', '')
             .. ' ' .. HourGlass() .. ' '
         popup_setoptions(menu_winid, {title: new_title})
         popup_setoptions(preview_winid, {title: ''})
@@ -1276,7 +1316,7 @@ def UpdateMainTitle() #{{{2
         # pressed,  there is  an  unusal long  time  for the  title  to go  from
         # `1/>100` to the final `1/9`.  We need a more reliable indicator.
         #}}}
-        ->substitute(')\zs [' .. join(HOURGLASS_CHARS, '') .. '] $', '', '') .. ' ' .. HourGlass() .. ' '
+        ->substitute(')\zs [' .. HOURGLASS_CHARS->join('') .. '] $', '', '') .. ' ' .. HourGlass() .. ' '
     popup_setoptions(menu_winid, {title: new_title})
 
     if filtered_everything
@@ -1341,7 +1381,7 @@ def ExtractInfo(line: string): dict<string> #{{{3
         return {
             filename: matchlist[1]->ExpandTilde(),
             lnum: matchlist[2],
-            }
+        }
     endif
 
     var splitted: list<string>
@@ -1374,12 +1414,12 @@ def ExtractInfo(line: string): dict<string> #{{{3
             # a string.
             #}}}
             filename: globpath(&rtp, 'doc/' .. splitted[1], true, true)->get(0, ''),
-            }
+        }
     else
         return {
             filename: splitted[0]->ExpandTilde()->fnamemodify(':p'),
             lnum: splitted[1],
-            }
+        }
     endif
 enddef
 
@@ -1486,7 +1526,11 @@ def PreviewHighlight(info: dict<string>) #{{{3
     endif
 enddef
 #}}}2
-def ExitCallback(type: string, id: number, result: any) #{{{2
+def ExitCallback( #{{{2
+    type: string,
+    id: number,
+    result: any
+)
     var idx: any = result
     var howtoopen: string = ''
     if typename(result) == 'number' && result <= 0
@@ -1581,7 +1625,7 @@ def Open(matchlist: any, how: string) #{{{2
         insplit: 'sp',
         intab: 'tabe',
         invertsplit: 'vs'
-        }, how, 'e')
+    }, how, 'e')
 
     var filename: string
     if matchlist->typename() == 'string'
@@ -1654,7 +1698,7 @@ def BailOutIfTooBig() #{{{2
     popup_close(menu_winid)
     Clean()
     # the timer avoids a hit-enter prompt
-    timer_start(0, () =>
+    timer_start(0, (_) =>
         printf('Cannot process more than %d entries', TOO_BIG)
             ->Error())
 enddef
@@ -1873,7 +1917,7 @@ def ToggleSelectedRegisterType() #{{{2
     setreg(regname, {
         regtype: {b: 'c', c: 'l', l: 'b'}[regtype],
         regcontents: getreg(regname, true, true),
-        })
+    })
 
     # reset the source so that the new type is picked up
     InitRegisters()
