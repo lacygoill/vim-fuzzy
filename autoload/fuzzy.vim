@@ -102,9 +102,8 @@ var loaded = true
 
 # TODO: Get rid of the Vim plugins fzf and fzf.vim.{{{
 #
-# Get rid of their config in `~/.vim/plugin` and/or `~/.vim/after/plugin`.
+# Get rid of their config in `~/.vim/plugin`.
 # Get rid of anything we've written about these plugins in our notes.
-# Update the `~/bin/up` script so that it updates the fzf binary.
 #
 # Update: Actually, there is still valuable code in there:
 #
@@ -271,7 +270,7 @@ def fuzzy#main(type: string, input = '') #{{{2
         return
     endif
 
-    if &bt == 'terminal' && win_gettype() == 'popup'
+    if &buftype == 'terminal' && win_gettype() == 'popup'
         # We cannot interact with a popup menu while a popup terminal is active.{{{
         #
         #     vim9script
@@ -323,7 +322,7 @@ def fuzzy#main(type: string, input = '') #{{{2
         if necessary > available
             offset = (necessary - available) / 2
             if (necessary - available) % 2 == 1
-                offset += 1
+                ++offset
             endif
         endif
         return offset
@@ -489,7 +488,7 @@ def InitCommandsOrMappings() #{{{2
         ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
         # transform each pair of lines into a dictionary
         ->mapnew((_, v: string): dict<string> => ({
-            text: matchstr(v, relevant)->substitute(noise, '', ''),
+            text: v->matchstr(relevant)->substitute(noise, '', ''),
             # `matchstr()` extracts the filename.{{{
             #
             #     Last set from /path/to/script.vim line 123
@@ -497,14 +496,14 @@ def InitCommandsOrMappings() #{{{2
             #
             # And `substitute()` replaces ` line 123` into `:123`.
             #}}}
-            trailer: matchstr(v, '/\zs[^/\\]*$')->substitute(' [^ ]* ', ':', ''),
+            trailer: v->matchstr('/\zs[^/\\]*$')->substitute(' [^ ]* ', ':', ''),
             # Don't invoke `ExpandTilde()` right now; it might be a little costly.{{{
             #
             # It was too costly in the past when we used `expand()`.  Now we use
             # `ExpandTilde()`, which relies on  `substitute()` and is faster, so
             # I don't know whether it would be still too costly.
             #}}}
-            location: matchstr(v, 'Last set from .* line \d\+$'),
+            location: v->matchstr('Last set from .* line \d\+$'),
         }))
 
     if sourcetype == 'Commands'
@@ -518,7 +517,7 @@ def InitCommandsOrMappings() #{{{2
     # align all the names of commands/mappings in a field (max 35 cells)
     var longest_name: number = source
         ->mapnew((_, v: dict<string>): number =>
-            matchstr(v.text, '^\S*')->strcharlen())
+            v.text->matchstr('^\S*')->strcharlen())
         ->max()
     longest_name = min([35, longest_name])
     source
@@ -526,7 +525,7 @@ def InitCommandsOrMappings() #{{{2
                 extend(v, {
                     text: v.text->matchstr('^\S*')
                                 ->printf('%-' .. longest_name .. 'S')
-                          .. ' ' .. matchstr(v.text, '^\S*\s\+\zs.*')
+                          .. ' ' .. v.text->matchstr('^\S*\s\+\zs.*')
         }))
 enddef
 
@@ -625,13 +624,13 @@ def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
         + copy(v:oldfiles)
             ->filter((_, v: string): bool => ExpandTilde(v)->filereadable())
-    recentfiles->map((_, v: string): string => fnamemodify(v, ':p'))
+    recentfiles->map((_, v: string): string => v->fnamemodify(':p'))
     var curbuf: string = expand('%:p')
     source = recentfiles
         ->filter((_, v: string): bool => v != '' && v != curbuf && !isdirectory(v))
         ->Uniq()
         ->mapnew((_, v: string): dict<string> => ({
-            text: fnamemodify(v, ':~:.'),
+            text: v->fnamemodify(':~:.'),
             trailer: '',
             location: ''
         }))
@@ -641,15 +640,16 @@ def InitRegisters() #{{{2
     # We use `:reg` to get the names of all registers.
     # But  we  still  use  `getreg()`  to get  their  contents,  because  `:reg`
     # truncates them after one screen line.
-    source = execute('reg')
-       ->split('\n')[1 :]
-       ->map((_, v: string): string => matchstr(v, '^  [lbc]  "\zs\S'))
-       ->mapnew((_, v: any): dict<string> => ({
-           text: getreg(v, true, true)->join('^J'),
-           header: printf('%s  "%s   ', {v: 'c', V: 'l'}->get(getregtype(v), 'b'), v),
-           trailer: '',
-           location: '',
-        }))
+    source = 'reg'
+        ->execute()
+        ->split('\n')[1 :]
+        ->map((_, v: string): string => v->matchstr('^  [lbc]  "\zs\S'))
+        ->mapnew((_, v: any): dict<string> => ({
+            text: getreg(v, true, true)->join('^J'),
+            header: printf('%s  "%s   ', {v: 'c', V: 'l'}->get(getregtype(v), 'b'), v),
+            trailer: '',
+            location: '',
+         }))
 enddef
 
 def Job_start(cmd: string) #{{{2
@@ -1391,7 +1391,7 @@ def ExtractInfo(line: string): dict<string> #{{{3
             ->matchstr('^.\{-}:\d\+\ze:')
             ->split('.*\zs:')
     elseif sourcetype =~ '^Registers'
-        return {registername: matchstr(line, '"\zs.')}
+        return {registername: line->matchstr('"\zs.')}
     else
         splitted = line->split('\t\+')
     endif
@@ -1550,7 +1550,7 @@ def ExitCallback( #{{{2
                 ->get(idx - 1)
                 ->get('header', '')
                 ->matchstr('^[bcl]  "\zs.')
-            var prefixkey: string = matchstr(sourcetype, 'Registers\zs.*')
+            var prefixkey: string = sourcetype->matchstr('Registers\zs.*')
             if prefixkey == '<c-r>'
                 feedkeys((col('.') >= col('$') - 1 ? 'a' : 'i') .. "\<c-r>\<c-r>" .. regname, 'in')
             else
@@ -1889,7 +1889,7 @@ enddef
 
 def HourGlass(): string #{{{2
     var char: string = HOURGLASS_CHARS[hourglass_idx]
-    hourglass_idx += 1
+    ++hourglass_idx
     if hourglass_idx >= len(HOURGLASS_CHARS)
       hourglass_idx = 0
     endif
