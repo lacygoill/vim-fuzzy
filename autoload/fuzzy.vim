@@ -569,6 +569,7 @@ def GetHelpTagsCmd(): string #{{{2
         # It makes perl iterate over the input lines somewhat like awk.
         #
         # See `man perlrun /^\s*-n`.
+        # This manpage is provided by the `perl-doc` package.
         #}}}
         #   `-e`{{{
         #
