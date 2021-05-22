@@ -1478,10 +1478,10 @@ def PreviewHighlight(info: dict<string>) #{{{3
         # Such as the ones raised here:
         #
         #     $ vim --clean --cmd 'let mapleader = "\<s-f5>"' /tmp/file.adb
-        #     E329: No menu "PopUp"~
-        #     E488: Trailing characters: :call ada#List_Tag ()<CR>: al :call ada#List_Tag ()<CR>~
-        #     E329: No menu "Tag"~
-        #     ...~
+        #     E329: No menu "PopUp"˜
+        #     E488: Trailing characters: :call ada#List_Tag ()<CR>: al :call ada#List_Tag ()<CR>˜
+        #     E329: No menu "Tag"˜
+        #     ...˜
         #
         # Those are  weird errors.  But the  point is that no  matter the error,
         # we're not interested in reading its message now.
@@ -1817,19 +1817,19 @@ def GetFindCmd(): string #{{{2
                 #                          ✘
                 #                      v-------v
                 #     $ find . -ipath '/tmp/test/ignore/*' -o -type f -print
-                #     ./file2~
-                #     ./file1~
-                #     ./ignore/file2~
-                #     ./ignore/file1~
-                #     ./ignore/file3~
-                #     ./file3~
+                #     ./file2˜
+                #     ./file1˜
+                #     ./ignore/file2˜
+                #     ./ignore/file1˜
+                #     ./ignore/file3˜
+                #     ./file3˜
                 #
                 #                      ✔
                 #                      v
                 #     $ find . -ipath './ignore/*' -o -type f -print
-                #     ./file2~
-                #     ./file1~
-                #     ./file3~
+                #     ./file2˜
+                #     ./file1˜
+                #     ./file3˜
                 #}}}
                 .. v
                     ->substitute('^\V' .. escape(cwd, '\') .. '/', './', '')
@@ -1849,7 +1849,7 @@ def ExpandTilde(path: string): string #{{{2
     # For example:
     #
     #     echo expand('~/[a-1]/file.txt')
-    #     E944: Reverse range in character class~
+    #     E944: Reverse range in character class˜
     #
     # Even though  `[a-1]` is an ugly  directory name, it's still  valid, and no
     # error should be raised.
