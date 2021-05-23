@@ -1767,7 +1767,7 @@ def Uniq(list: list<string>): list<string> #{{{2
     var ret: list<string>
     for path in list
         if !empty(path) && !visited->has_key(path)
-            add(ret, path)
+            ret->add(path)
             visited[path] = 1
         endif
     endfor
