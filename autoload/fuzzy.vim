@@ -702,7 +702,7 @@ def Job_start(cmd: string) #{{{2
             var n: number = v:echospace - 3
             var n1: number = n % 2 ? n / 2 : n / 2 - 1
             var n2: number = n / 2
-            msg = matchlist(msg, '\(.\{' .. n1 .. '}\).*\(.\{' .. n2 .. '}\)')[1 : 2]->join('...')
+            msg = msg->matchlist('\(.\{' .. n1 .. '}\).*\(.\{' .. n2 .. '}\)')[1 : 2]->join('...')
         endif
         # even though the message is shortened, we still get a weird hit-enter prompt;
         # delaying the message fixes the issue
@@ -1435,7 +1435,7 @@ def PreviewSpecialFile(filename: string) #{{{3
         socket: 'Socket',
         fifo: 'FIFO',
         other: 'unknown',
-        }->get(getftype(filename), '')
+    }->get(getftype(filename), '')
     if text == 'Directory'
         try
             popup_settext(preview_winid, readdir(filename))
