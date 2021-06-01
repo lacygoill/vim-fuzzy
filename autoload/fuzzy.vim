@@ -511,7 +511,7 @@ def InitCommandsOrMappings() #{{{2
         #
         #     Name              Args Address Complete    Definition
         #}}}
-        remove(source, 0)
+        source->remove(0)
     endif
 
     # align all the names of commands/mappings in a field (max 35 cells)
