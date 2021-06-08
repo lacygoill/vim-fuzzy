@@ -313,12 +313,12 @@ def fuzzy#main(type: string, input = '') #{{{2
     endif
 
     var height: number = &lines / 3
-    var statusline: number = (&ls == 2 || &ls == 1 && winnr('$') >= 2) ? 1 : 0
-    var tabline: number = (&stal == 2 || &stal == 1 && tabpagenr('$') >= 2) ? 1 : 0
+    var statusline: number = (&laststatus == 2 || &laststatus == 1 && winnr('$') >= 2) ? 1 : 0
+    var tabline: number = (&showtabline == 2 || &showtabline == 1 && tabpagenr('$') >= 2) ? 1 : 0
     def Offset(): number
         var offset: number = 0
         var necessary: number = 2 * height + BORDERS
-        var available: number = &lines - &ch - statusline - tabline
+        var available: number = &lines - &cmdheight - statusline - tabline
         if necessary > available
             offset = (necessary - available) / 2
             if (necessary - available) % 2 == 1
@@ -334,7 +334,7 @@ def fuzzy#main(type: string, input = '') #{{{2
     endif
 
     popup_width = min([TEXTWIDTH, &columns - BORDERS])
-    var lnum: number = &lines - &ch - statusline - height - 1
+    var lnum: number = &lines - &cmdheight - statusline - height - 1
 
     var opts: dict<any> = {
         line: lnum,
@@ -530,7 +530,7 @@ def InitCommandsOrMappings() #{{{2
 enddef
 
 def GetHelpTagsCmd(): string #{{{2
-    var tagfiles: list<string> = globpath(&rtp, 'doc/tags', true, true)
+    var tagfiles: list<string> = globpath(&runtimepath, 'doc/tags', true, true)
 
     # What's the purpose of this formatting command?{{{
     #
@@ -731,11 +731,11 @@ def SetIntermediateSource(_, argdata: string) #{{{2
     else
         data = argdata
     endif
-    var splitted_data: list<string> = split(data, '\n\ze.')
+    var splitted_data: list<string> = data->split('\n\ze.')
     # The last line of `argdata` does not necessarily match a full shell output line.
     # Most of the time, it's incomplete.
-    incomplete = remove(splitted_data, -1)
-    if len(splitted_data) == 0
+    incomplete = splitted_data->remove(-1)
+    if splitted_data->len() == 0
         return
     endif
 
@@ -747,7 +747,7 @@ def SetIntermediateSource(_, argdata: string) #{{{2
     #}}}
     if sourcetype == 'HelpTags'
         splitted_data
-            ->mapnew((_, v: string): list<string> => split(v, '\t'))
+            ->mapnew((_, v: string): list<string> => v->split('\t'))
             ->mapnew((_, v: list<string>): dict<string> =>
                         ({text: v[0], trailer: v[1], location: ''}))
             ->AppendSource()
@@ -829,7 +829,7 @@ def SetFinalSource(_) #{{{2
     # the last line of the shell ouput ends with an undesirable trailing newline
     incomplete = incomplete->trim("\<NL>", 2)
     if sourcetype == 'HelpTags'
-        var parts: list<string> = split(incomplete, '\t')
+        var parts: list<string> = incomplete->split('\t')
         [{text: parts[0], trailer: parts[1], location: ''}]->AppendSource()
     else
         [{text: incomplete, trailer: '', location: ''}]->AppendSource()
@@ -912,10 +912,10 @@ def PopupFilter(id: number, key: string): bool #{{{2
 
     # allow for the preview to be scrolled
     elseif key == "\<m-j>" || key == "\<f21>"
-        win_execute(preview_winid, ['setl cul', 'norm! j'])
+        win_execute(preview_winid, ['&l:cursorline = true', 'norm! j'])
         return true
     elseif key == "\<m-k>" || key == "\<f22>"
-        win_execute(preview_winid, ['setl cul', 'norm! k'])
+        win_execute(preview_winid, ['&l:cursorline = true', 'norm! k'])
         return true
     # reset the cursor position in the preview popup
     elseif key == "\<m-r>" || key == "\<f29>"
@@ -1414,7 +1414,7 @@ def ExtractInfo(line: string): dict<string> #{{{3
             # several files.  It's easier to extract the first one from a list than from
             # a string.
             #}}}
-            filename: globpath(&rtp, 'doc/' .. splitted[1], true, true)->get(0, ''),
+            filename: globpath(&runtimepath, 'doc/' .. splitted[1], true, true)->get(0, ''),
         }
     else
         return {
@@ -1488,10 +1488,10 @@ def PreviewHighlight(info: dict<string>) #{{{3
         #}}}
         var setsyntax: string = 'syn clear | sil! do filetypedetect BufReadPost '
             .. fnameescape(filename)
-        var fullconceal: string = '&l:cole = 3'
+        var fullconceal: string = '&l:conceallevel = 3'
         var unfold: string = 'norm! zR'
         var whereAmI: string = sourcetype == 'Commands' || sourcetype =~ '^Mappings'
-            ? '&l:cul = true'
+            ? '&l:cursorline = true'
             : ''
         win_execute(preview_winid, [setsyntax, fullconceal, unfold, whereAmI])
     enddef
@@ -1512,7 +1512,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
         #}}}
         lnum = win_execute(preview_winid, searchcmd)->trim("\<NL>")
         var showtag: string = 'norm! ' .. lnum .. 'G'
-        win_execute(preview_winid, setsyntax + ['&l:cole = 3', showtag])
+        win_execute(preview_winid, setsyntax + ['&l:conceallevel = 3', showtag])
 
     elseif sourcetype == 'Commands' || sourcetype == 'Grep' || sourcetype =~ '^Mappings'
         win_execute(preview_winid, 'norm! ' .. lnum .. 'Gzz')
@@ -1776,7 +1776,7 @@ enddef
 
 def GetFindCmd(): string #{{{2
     # split before any comma which is not preceded by an odd number of backslashes
-    var tokens: list<string> = split(&wig, '\%(\\\@<!\\\%(\\\\\)*\\\@!\)\@<!,')
+    var tokens: list<string> = split(&wildignore, '\%(\\\@<!\\\%(\\\\\)*\\\@!\)\@<!,')
 
     # ignore files whose name is present in `'wildignore'` (e.g. `tags`)
     var by_name: string = tokens
