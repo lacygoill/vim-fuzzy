@@ -152,7 +152,7 @@ const HOURGLASS_CHARS: list<string> = ['―', '\', '|', '/']
 # in the filter  text might increase the  number of matches (e.g. from  0 to 1),
 # which is jarring.
 #}}}
-const MIN_SCORE: number = -5000
+const MIN_SCORE: number = -5'000
 
 # There is no need to display *all* the filtered lines in the popup.{{{
 #
@@ -333,7 +333,7 @@ def fuzzy#main(type: string, input = '') #{{{2
         return
     endif
 
-    popup_width = min([TEXTWIDTH, &columns - BORDERS])
+    popup_width = [TEXTWIDTH, &columns - BORDERS]->min()
     var lnum: number = &lines - &cmdheight - statusline - height - 1
 
     var opts: dict<any> = {
@@ -827,7 +827,7 @@ def SetFinalSource(_) #{{{2
         return
     endif
     # the last line of the shell ouput ends with an undesirable trailing newline
-    incomplete = incomplete->trim("\<NL>", 2)
+    incomplete = incomplete->trim("\n", 2)
     if sourcetype == 'HelpTags'
         var parts: list<string> = incomplete->split('\t')
         [{text: parts[0], trailer: parts[1], location: ''}]->AppendSource()
@@ -1317,7 +1317,8 @@ def UpdateMainTitle() #{{{2
         # pressed,  there is  an  unusal long  time  for the  title  to go  from
         # `1/>100` to the final `1/9`.  We need a more reliable indicator.
         #}}}
-        ->substitute(')\zs [' .. HOURGLASS_CHARS->join('') .. '] $', '', '') .. ' ' .. HourGlass() .. ' '
+        ->substitute(')\zs [' .. HOURGLASS_CHARS->join('') .. '] $', '', '')
+        .. ' ' .. HourGlass() .. ' '
     popup_setoptions(menu_winid, {title: new_title})
 
     if filtered_everything
@@ -1331,7 +1332,8 @@ def UpdateMainTitle() #{{{2
 enddef
 
 def UpdatePreview(timerid = 0) #{{{2
-    var line: string = getbufline(menu_buf, line('.', menu_winid))->get(0, '')
+    var line: string = getbufline(menu_buf, line('.', menu_winid))
+        ->get(0, '')
 
     # clear the preview if nothing matches the filtering pattern
     if line == ''
@@ -1510,7 +1512,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
         # You'll need to run `:redraw`; but the latter causes some flicker (with the
         # cursor, and in the statusline, tabline).
         #}}}
-        lnum = win_execute(preview_winid, searchcmd)->trim("\<NL>")
+        lnum = win_execute(preview_winid, searchcmd)->trim("\n")
         var showtag: string = 'norm! ' .. lnum .. 'G'
         win_execute(preview_winid, setsyntax + ['&l:conceallevel = 3', showtag])
 
@@ -1763,12 +1765,12 @@ def BuflistedSorted(): list<string> #{{{2
 enddef
 
 def Uniq(list: list<string>): list<string> #{{{2
-    var visited: dict<number>
+    var visited: dict<bool>
     var ret: list<string>
     for path in list
         if !empty(path) && !visited->has_key(path)
             ret->add(path)
-            visited[path] = 1
+            visited[path] = true
         endif
     endfor
     return ret
