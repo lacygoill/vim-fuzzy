@@ -38,7 +38,7 @@ var loaded = true
 #    > I'm leaning to denite style pattern but that means it won't work in popup.
 #    > vim-clap already seems to be hitting this issue.
 #
-# It has been acknowledged in the todo list.  From `:h todo /^Popup`:
+# It has been acknowledged in the todo list.  From `:help todo /^Popup`:
 #
 #    > Popup windows:
 #    > - Add a flag to make a popup window focusable?
@@ -120,12 +120,12 @@ var loaded = true
 #
 # What about this mapping:
 #
-#     nno <space>fm<esc> <nop>
+#     nnoremap <Space>fm<Esc> <Nop>
 #
 # Will we still need it?
 #
-# Also, read `:h fzf-vim`.  Make sure  we don't lose any valuable feature before
-# removing the plugins.
+# Also, read  `:help fzf-vim`.   Make sure  we don't  lose any  valuable feature
+# before removing the plugins.
 #}}}
 
 # Config {{{1
@@ -447,7 +447,7 @@ def InitCommandsOrMappings() #{{{2
     var noise: string
 
     if sourcetype == 'Commands'
-        cmd = 'verb com'
+        cmd = 'verbose command'
         # The first 4 characters are used for flags, and what comes after the newline is irrelevant.{{{
         #
         #     !"b|SomeCmd ...
@@ -465,7 +465,7 @@ def InitCommandsOrMappings() #{{{2
         noise = '^\S*\zs.*\%43c'
 
     elseif sourcetype =~ '^Mappings'
-        cmd = 'verb ' .. sourcetype[-2]->tolower() .. 'map'
+        cmd = 'verbose ' .. sourcetype[-2]->tolower() .. 'map'
         # The first 3 characters are used for the mode.{{{
         #
         #     nox<key> ...
@@ -638,10 +638,10 @@ def InitRecentFiles() #{{{2
 enddef
 
 def InitRegisters() #{{{2
-    # We use `:reg` to get the names of all registers.
-    # But  we  still  use  `getreg()`  to get  their  contents,  because  `:reg`
+    # We use `:registers` to get the names of all registers.
+    # But we  still use `getreg()`  to get their contents,  because `:registers`
     # truncates them after one screen line.
-    source = 'reg'
+    source = 'registers'
         ->execute()
         ->split('\n')[1 :]
         ->map((_, v: string): string => v->matchstr('^  [lbc]  "\zs\S'))
@@ -778,7 +778,7 @@ def SetFinalSource(_) #{{{2
     #     E684: list index out of range: 1
     #
     # I  *think* the  issue  was due  to the  fact  that `SetFinalSource()`  was
-    # invoked as an exit callback.  From `:h job-exit_cb`:
+    # invoked as an exit callback.  From `:help job-exit_cb`:
     #
     #    > Note that data can be buffered, callbacks may still be
     #    > called after the process ends.
@@ -791,7 +791,7 @@ def SetFinalSource(_) #{{{2
     # Besides,  now, we  don't invoke  this  function from  `exit_cb`, but  from
     # `close_cb`, because it seems that it gives us this guarantee.
     #
-    # From `:h close_cb`:
+    # From `:help close_cb`:
     #
     #    > Vim will invoke callbacks that handle data before invoking
     #    > close_cb, thus when this function is called no more data will
@@ -801,7 +801,7 @@ def SetFinalSource(_) #{{{2
     # sometimes have an issue where the end of a manpage is truncated.
     # `sleep 1m` fixes that issue.  Which  probably means that not all callbacks
     # have been processed when `close_cb` runs it callback.  **Why?**
-    # Is the explanation given at `:h close_cb`?:
+    # Is the explanation given at `:help close_cb`?:
     #
     #    > However, if a  callback causes Vim to check for  messages, the close_cb
     #    > may be  invoked while still  in the  callback.  The plugin  must handle
@@ -857,7 +857,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         return true
 
     # clear the filter text entirely
-    elseif key == "\<c-u>"
+    elseif key == "\<C-U>"
         filter_text = ''
         # The popup menu might get empty without this.
         last_filtered_line = -1
@@ -865,7 +865,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         return true
 
     # erase only one character from the filter text
-    elseif key == "\<bs>" || key == "\<c-h>"
+    elseif key == "\<BS>" || key == "\<C-H>"
         if strlen(filter_text) >= 1
             filter_text = filter_text[: -2]
             UpdatePopups()
@@ -873,7 +873,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         return true
 
     # select a neighboring line
-    elseif index(["\<down>", "\<up>", "\<c-n>", "\<c-p>"], key) >= 0
+    elseif index(["\<Down>", "\<Up>", "\<C-N>", "\<C-P>"], key) >= 0
         var curline: number = line('.', menu_winid)
         var lastline: number = line('$', menu_winid)
         # No need to update the popup if we try to move beyond the first/last line.{{{
@@ -883,8 +883,8 @@ def PopupFilter(id: number, key: string): bool #{{{2
         # `C-n` or `C-p` for a bit too long.  Note that `id` (function argument)
         # and `menu_winid` (script local) have the same value.
         #}}}
-        if index(["\<up>", "\<c-p>"], key) >= 0 && curline == 1
-        || index(["\<down>", "\<c-n>"], key) >= 0 && curline == lastline
+        if index(["\<Up>", "\<C-P>"], key) >= 0 && curline == 1
+        || index(["\<Down>", "\<C-N>"], key) >= 0 && curline == lastline
             return true
         endif
 
@@ -895,43 +895,43 @@ def PopupFilter(id: number, key: string): bool #{{{2
                 moving_in_popup = false
             })
 
-        var cmd: string = 'norm! ' .. (key == "\<c-n>" || key == "\<down>" ? 'j' : 'k')
+        var cmd: string = 'normal! ' .. (key == "\<C-N>" || key == "\<Down>" ? 'j' : 'k')
         win_execute(menu_winid, cmd)
         UpdatePopups(false)
         return true
 
     # select first or last line
-    elseif key == "\<c-g>"
+    elseif key == "\<C-G>"
         if line('.', menu_winid) == 1
-            win_execute(menu_winid, 'norm! G')
+            win_execute(menu_winid, 'normal! G')
         else
-            win_execute(menu_winid, 'norm! 1G')
+            win_execute(menu_winid, 'normal! 1G')
         endif
         UpdatePopups(false)
         return true
 
     # allow for the preview to be scrolled
-    elseif key == "\<m-j>" || key == "\<f21>"
-        win_execute(preview_winid, ['&l:cursorline = true', 'norm! j'])
+    elseif key == "\<M-J>" || key == "\<F21>"
+        win_execute(preview_winid, ['&l:cursorline = true', 'normal! j'])
         return true
-    elseif key == "\<m-k>" || key == "\<f22>"
-        win_execute(preview_winid, ['&l:cursorline = true', 'norm! k'])
+    elseif key == "\<M-K>" || key == "\<F22>"
+        win_execute(preview_winid, ['&l:cursorline = true', 'normal! k'])
         return true
     # reset the cursor position in the preview popup
-    elseif key == "\<m-r>" || key == "\<f29>"
+    elseif key == "\<M-R>" || key == "\<F29>"
         UpdatePreview()
         return true
 
-    elseif key == "\<c-o>" && sourcetype =~ '^Registers'
+    elseif key == "\<C-O>" && sourcetype =~ '^Registers'
         ToggleSelectedRegisterType()
         return true
 
-    elseif index(["\<c-s>", "\<c-t>", "\<c-v>"], key) >= 0
+    elseif index(["\<C-S>", "\<C-T>", "\<C-V>"], key) >= 0
         popup_close(menu_winid, {
             howtoopen: {
-                ["\<c-s>"]: 'insplit',
-                ["\<c-t>"]: 'intab',
-                ["\<c-v>"]: 'invertsplit'
+                ["\<C-S>"]: 'insplit',
+                ["\<C-T>"]: 'intab',
+                ["\<C-V>"]: 'invertsplit'
                 }[key],
             idx: line('.', menu_winid),
         })
@@ -1061,7 +1061,7 @@ def UpdateMainText() #{{{2
         #
         # Test:
         #
-        #     $ vim -i NONE /tmp/file +'let [@+, @*] = ["", ""]' +'norm! 1G"ayy' +'norm! 2G"byy' +'norm! 3G"cyy' +'norm! 4G"dyy'
+        #     $ vim -i NONE /tmp/file +'let [@+, @*] = ["", ""]' +'normal! 1G"ayy' +'normal! 2G"byy' +'normal! 3G"cyy' +'normal! 4G"dyy'
         #
         # Where `/tmp/file` contains this:
         #
@@ -1118,7 +1118,7 @@ def UpdateMainText() #{{{2
     # Besides, that's what `fzf(1)` does.
     #}}}
     if filter_text_has_changed
-        win_execute(menu_winid, 'norm! 1G')
+        win_execute(menu_winid, 'normal! 1G')
     endif
 
     EchoSourceAndFilterText()
@@ -1186,7 +1186,7 @@ def InjectTextProps( #{{{2
 
     if filter_text !~ '\S' && sourcetype !~ '^Registers'
         return (_, v: dict<string>): dict<any> => ({
-            text: v.text .. "\t" .. v.trailer,
+            text: v.text .. "\<Tab>" .. v.trailer,
             props: [{
                       col: v.text->strlen() + 1,
                       end_col: popup_width,
@@ -1198,7 +1198,7 @@ def InjectTextProps( #{{{2
     elseif filter_text !~ '\S' && sourcetype =~ '^Registers'
         return (_, v: dict<string>): dict<any> => ({
             header: v.header,
-            text: v.header .. v.text .. "\t" .. v.trailer,
+            text: v.header .. v.text .. "\<Tab>" .. v.trailer,
             props: [{
                       col: 0,
                       end_col: v.header->strlen(),
@@ -1213,7 +1213,7 @@ def InjectTextProps( #{{{2
 
     elseif filter_text =~ '\S' && sourcetype !~ '^Registers'
         return (i: number, v: dict<any>): dict<any> => ({
-            text: v.text .. "\t" .. v.trailer,
+            text: v.text .. "\<Tab>" .. v.trailer,
             props: pos[i]->mapnew((_, w: number): dict<any> => ({
                         col: w + 1,
                         length: 1,
@@ -1231,7 +1231,7 @@ def InjectTextProps( #{{{2
     elseif filter_text =~ '\S' && sourcetype =~ '^Registers'
         return (i: number, v: dict<any>): dict<any> => ({
             header: v.header,
-            text: v.header .. v.text .. "\t" .. v.trailer,
+            text: v.header .. v.text .. "\<Tab>" .. v.trailer,
             props: pos[i]->mapnew((_, w: number): dict<any> => ({
                         col: w + 1 + strlen(v.header),
                         length: 1,
@@ -1360,7 +1360,7 @@ def UpdatePreview(timerid = 0) #{{{2
         return
     # don't preview a huge file (takes too much time)
     elseif filename->getfsize() > PREVIEW_MAXSIZE
-        win_execute(preview_winid, 'syn clear')
+        win_execute(preview_winid, 'syntax clear')
         popup_settext(preview_winid, 'cannot preview file bigger than '
             .. float2nr(PREVIEW_MAXSIZE / pow(2, 20)) .. ' MiB')
         return
@@ -1427,7 +1427,7 @@ def ExtractInfo(line: string): dict<string> #{{{3
 enddef
 
 def PreviewSpecialFile(filename: string) #{{{3
-    win_execute(preview_winid, 'syn clear')
+    win_execute(preview_winid, 'syntax clear')
     var text: string = {
         file: 'File not readable',
         dir: 'Directory',
@@ -1471,15 +1471,15 @@ def PreviewHighlight(info: dict<string>) #{{{3
         # A whole bunch of Vim syntax items are currently defined.
         #
         # Now, suppose  the current file which  is previewed is a  simple `.txt`
-        # file; `do filetypedetect BufReadPost`  won't install new syntax items,
-        # and won't  clear the  old ones;  IOW, your text  file will  be wrongly
-        # highlighted with the Vim syntax.
+        # file; `doautocmd filetypedetect BufReadPost`  won't install new syntax
+        # items,  and won't  clear the  old ones;  IOW, your  text file  will be
+        # wrongly highlighted with the Vim syntax.
         #}}}
         # `silent!` to suppress a possible error.{{{
         #
         # Such as the ones raised here:
         #
-        #     $ vim --clean --cmd 'let mapleader = "\<s-f5>"' /tmp/file.adb
+        #     $ vim --clean --cmd 'let mapleader = "\<S-F5>"' /tmp/file.adb
         #     E329: No menu "PopUp"˜
         #     E488: Trailing characters: :call ada#List_Tag ()<CR>: al :call ada#List_Tag ()<CR>˜
         #     E329: No menu "Tag"˜
@@ -1488,10 +1488,10 @@ def PreviewHighlight(info: dict<string>) #{{{3
         # Those are  weird errors.  But the  point is that no  matter the error,
         # we're not interested in reading its message now.
         #}}}
-        var setsyntax: string = 'syn clear | sil! do filetypedetect BufReadPost '
+        var setsyntax: string = 'syntax clear | silent! doautocmd filetypedetect BufReadPost '
             .. fnameescape(filename)
         var fullconceal: string = '&l:conceallevel = 3'
-        var unfold: string = 'norm! zR'
+        var unfold: string = 'normal! zR'
         var whereAmI: string = sourcetype == 'Commands' || sourcetype =~ '^Mappings'
             ? '&l:cursorline = true'
             : ''
@@ -1502,7 +1502,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
     if sourcetype == 'HelpTags'
         var setsyntax: list<string> =<< trim END
             if get(b:, 'current_syntax', '') != 'help'
-            do Syntax help
+            doautocmd Syntax help
             endif
         END
         var searchcmd: string = printf("echo search('\\*\\V%s\\m\\*', 'n')", tagname)
@@ -1513,11 +1513,11 @@ def PreviewHighlight(info: dict<string>) #{{{3
         # cursor, and in the statusline, tabline).
         #}}}
         lnum = win_execute(preview_winid, searchcmd)->trim("\n")
-        var showtag: string = 'norm! ' .. lnum .. 'G'
+        var showtag: string = 'normal! ' .. lnum .. 'G'
         win_execute(preview_winid, setsyntax + ['&l:conceallevel = 3', showtag])
 
     elseif sourcetype == 'Commands' || sourcetype == 'Grep' || sourcetype =~ '^Mappings'
-        win_execute(preview_winid, 'norm! ' .. lnum .. 'Gzz')
+        win_execute(preview_winid, 'normal! ' .. lnum .. 'Gzz')
         Prettify()
         popup_setoptions(preview_winid, {title: ' ' .. filename})
 
@@ -1554,8 +1554,8 @@ def ExitCallback( #{{{2
                 ->get('header', '')
                 ->matchstr('^[bcl]  "\zs.')
             var prefixkey: string = sourcetype->matchstr('Registers\zs.*')
-            if prefixkey == '<c-r>'
-                feedkeys((col('.') >= col('$') - 1 ? 'a' : 'i') .. "\<c-r>\<c-r>" .. regname, 'in')
+            if prefixkey == '<C-R>'
+                feedkeys((col('.') >= col('$') - 1 ? 'a' : 'i') .. "\<C-R>\<C-R>" .. regname, 'in')
             else
                 feedkeys(prefixkey .. regname, 'in')
             endif
@@ -1577,7 +1577,7 @@ def ExitCallback( #{{{2
         # Maybe an error  is raised somewhere (not necessarily  from the current
         # function; it could be due to a triggered autocmd defined elsewhere).
         # And if an error is raised, `Enter` is not discarded.
-        # From `:h popup-filter-errors`:
+        # From `:help popup-filter-errors`:
         #
         #    > If the filter causes an error then it is assumed to return zero.
         #
@@ -1607,7 +1607,7 @@ def ExitCallback( #{{{2
             matchlist(chosen, '^\(.\{-}\):\(\d\+\):')
                 ->Open(howtoopen)
         elseif type == 'HelpTags'
-            exe 'h ' .. chosen
+            execute 'help ' .. chosen
 
         elseif type == 'Commands' || type =~ '^Mappings'
             get(filtered_source ?? source, idx - 1, {})
@@ -1615,7 +1615,7 @@ def ExitCallback( #{{{2
                 ->matchlist('Last set from \(.*\) line \(\d\+\)$')
                 ->Open(howtoopen)
         endif
-        norm! zv
+        normal! zv
     catch
         Error(v:exception)
     finally
@@ -1625,15 +1625,15 @@ enddef
 
 def Open(matchlist: any, how: string) #{{{2
     var cmd: string = get({
-        insplit: 'sp',
-        intab: 'tabe',
-        invertsplit: 'vs'
-    }, how, 'e')
+        insplit: 'split',
+        intab: 'tabedit',
+        invertsplit: 'vsplit'
+    }, how, 'edit')
 
     var filename: string
     if matchlist->typename() == 'string'
         filename = matchlist
-        exe cmd .. ' ' .. filename->fnameescape()
+        execute cmd .. ' ' .. filename->fnameescape()
         return
     endif
 
@@ -1643,8 +1643,8 @@ def Open(matchlist: any, how: string) #{{{2
 
     var lnum: string
     [filename, lnum] = matchlist[1 : 2]
-    exe cmd .. ' ' .. filename->fnameescape()
-    exe 'norm! ' .. lnum .. 'G'
+    execute cmd .. ' ' .. filename->fnameescape()
+    execute 'normal! ' .. lnum .. 'G'
 enddef
 
 def Clean() #{{{2
@@ -1690,7 +1690,7 @@ enddef
 # Utility {{{1
 def Error(msg: string) #{{{2
     echohl ErrorMsg
-    echom msg
+    echomsg msg
     echohl None
 enddef
 

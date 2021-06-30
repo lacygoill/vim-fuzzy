@@ -16,30 +16,30 @@ var loaded = true
 # If we supply an  initial pattern to an Ex command, we should  never be able to
 # remove any character from it (be it with `C-u`, `C-h`, `BS`).
 
-com! -bar -nargs=? FzCommands fuzzy#main('Commands', <q-args>)
-com! -bar -nargs=? FzFiles fuzzy#main('Files', <q-args>)
-com! -bar -nargs=? FzGrep fuzzy#main('Grep', <q-args>)
-com! -bar -nargs=? FzHelpTags fuzzy#main('HelpTags', <q-args>)
-com! -bar -nargs=? FzLocate fuzzy#main('Locate', <q-args>)
+command! -bar -nargs=? FzCommands fuzzy#main('Commands', <q-args>)
+command! -bar -nargs=? FzFiles fuzzy#main('Files', <q-args>)
+command! -bar -nargs=? FzGrep fuzzy#main('Grep', <q-args>)
+command! -bar -nargs=? FzHelpTags fuzzy#main('HelpTags', <q-args>)
+command! -bar -nargs=? FzLocate fuzzy#main('Locate', <q-args>)
 
-nno <space>fc <cmd>call fuzzy#main('Commands')<cr>
-nno <space>ff <cmd>call fuzzy#main('Files')<cr>
-nno <space>fgg <cmd>call fuzzy#main('Grep')<cr>
-nno <space>fh <cmd>call fuzzy#main('HelpTags')<cr>
+nnoremap <Space>fc <Cmd>call fuzzy#main('Commands')<CR>
+nnoremap <Space>ff <Cmd>call fuzzy#main('Files')<CR>
+nnoremap <Space>fgg <Cmd>call fuzzy#main('Grep')<CR>
+nnoremap <Space>fh <Cmd>call fuzzy#main('HelpTags')<CR>
 # How is `Locate` useful compared to `Files`?{{{
 #
 # `locate(1)` is much faster than `find(1)` and `fd(1)`.
 # And it can find *all* the files, not just the ones in the cwd.
 #}}}
-nno <space>fl <cmd>call fuzzy#main('Locate')<cr>
+nnoremap <Space>fl <Cmd>call fuzzy#main('Locate')<CR>
 
-nno <space>fmn <cmd>call fuzzy#main('Mappings (n)')<cr>
-nno <space>fmx <cmd>call fuzzy#main('Mappings (x)')<cr>
-nno <space>fmi <cmd>call fuzzy#main('Mappings (i)')<cr>
-nno <space>fmo <cmd>call fuzzy#main('Mappings (o)')<cr>
+nnoremap <Space>fmn <Cmd>call fuzzy#main('Mappings (n)')<CR>
+nnoremap <Space>fmx <Cmd>call fuzzy#main('Mappings (x)')<CR>
+nnoremap <Space>fmi <Cmd>call fuzzy#main('Mappings (i)')<CR>
+nnoremap <Space>fmo <Cmd>call fuzzy#main('Mappings (o)')<CR>
 
-nno <space>fr <cmd>call fuzzy#main('RecentFiles')<cr>
+nnoremap <Space>fr <Cmd>call fuzzy#main('RecentFiles')<CR>
 
-nno "<c-f> <cmd>call fuzzy#main('Registers"')<cr>
-nno @<c-f> <cmd>call fuzzy#main('Registers@')<cr>
-ino <c-r><c-f> <cmd>call fuzzy#main('Registers<c-r>')<cr>
+nnoremap "<C-F> <Cmd>call fuzzy#main('Registers"')<CR>
+nnoremap @<C-F> <Cmd>call fuzzy#main('Registers@')<CR>
+inoremap <C-R><C-F> <Cmd>call fuzzy#main('Registers<C-R>')<CR>
