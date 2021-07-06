@@ -1,8 +1,5 @@
 vim9script noclear
 
-if exists('loaded') | finish | endif
-var loaded = true
-
 # I want to be able to edit my input!{{{
 #
 # For now, I don't know how to do that.
@@ -243,11 +240,11 @@ def fuzzy#main(type: string, input = '') #{{{2
     # Without this reset, we might wrongly re-use a stale source.{{{
     #
     #     $ cd && vim
-    #     " press:  SPC ff C-c
+    #     # press:  SPC ff C-c
     #     :cd /etc
-    #     " press:  SPC ff
-    #     " expected: the files of `/etc` are listed
-    #     " actual: some of the files of the home directory are listed
+    #     # press:  SPC ff
+    #     # expected: the files of `/etc` are listed
+    #     # actual: some of the files of the home directory are listed
     #}}}
     #   But we already invoke `Reset()` from `Clean()`, isn't that enough?{{{
     #
@@ -273,7 +270,6 @@ def fuzzy#main(type: string, input = '') #{{{2
     if &buftype == 'terminal' && win_gettype() == 'popup'
         # We cannot interact with a popup menu while a popup terminal is active.{{{
         #
-        #     vim9script
         #     term_start(&shell, {hidden: true})
         #         ->popup_create({
         #             border: [],
@@ -521,7 +517,7 @@ def InitCommandsOrMappings() #{{{2
         ->max()
     longest_name = min([35, longest_name])
     source
-        ->map((_, v: dict<string>): dict<string> =>
+        ->map((_, v: dict<string>) =>
                 extend(v, {
                     text: v.text->matchstr('^\S*')
                                 ->printf('%-' .. longest_name .. 'S')
@@ -611,7 +607,7 @@ def GetHelpTagsCmd(): string #{{{2
     #}}}
     var shellpipeline: string = 'grep -H ".*" '
         .. tagfiles
-            ->map((_, v: string): string => shellescape(v))
+            ->map((_, v: string) => shellescape(v))
             ->sort()
             ->uniq()
             ->join()
@@ -625,7 +621,7 @@ def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
         + copy(v:oldfiles)
             ->filter((_, v: string): bool => ExpandTilde(v)->filereadable())
-    recentfiles->map((_, v: string): string => v->fnamemodify(':p'))
+    recentfiles->map((_, v: string) => v->fnamemodify(':p'))
     var curbuf: string = expand('%:p')
     source = recentfiles
         ->filter((_, v: string): bool => v != '' && v != curbuf && !isdirectory(v))
@@ -644,7 +640,7 @@ def InitRegisters() #{{{2
     source = 'registers'
         ->execute()
         ->split('\n')[1 :]
-        ->map((_, v: string): string => v->matchstr('^  [lbc]  "\zs\S'))
+        ->map((_, v: string) => v->matchstr('^  [lbc]  "\zs\S'))
         ->mapnew((_, v: any): dict<string> => ({
             text: getreg(v, true, true)->join('^J'),
             header: printf('%s  "%s   ', {v: 'c', V: 'l'}->get(getregtype(v), 'b'), v),
@@ -1157,8 +1153,8 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
             # composed of short strings (e.g. filenames).
             #}}}
             ->filter(strlen(filter_text) <= 1 || sourcetype =~ '^Registers'
-                ?     (_, v: dict<any>): bool => true
-                :     (_, v: dict<any>): bool => v.score > MIN_SCORE
+                ?     (_, v: dict<any>) => true
+                :     (_, v: dict<any>) => v.score > MIN_SCORE
             )->sort((a: dict<any>, b: dict<any>): number =>
                           a.score == b.score
                         ?     0
@@ -1784,14 +1780,14 @@ def GetFindCmd(): string #{{{2
     var by_name: string = tokens
         ->copy()
         ->filter((_, v: string): bool => v !~ '[/*]')
-        ->map((_, v: string): string => '-iname ' .. shellescape(v) .. ' -o')
+        ->map((_, v: string) => '-iname ' .. shellescape(v) .. ' -o')
         ->join()
 
     # ignore files whose extension is present in `'wildignore'` (e.g. `*.mp3`)
     var by_extension: string = tokens
         ->copy()
         ->filter((_, v: string): bool => v =~ '\*' && v !~ '/')
-        ->map((_, v: string): string => '-iname ' .. shellescape(v) .. ' -o')
+        ->map((_, v: string) => '-iname ' .. shellescape(v) .. ' -o')
         ->join()
 
     # ignore files whose directory is present in `'wildignore'` (e.g. `*/build/*`)
@@ -1806,7 +1802,7 @@ def GetFindCmd(): string #{{{2
     var by_directory: string = tokens
         ->copy()
         ->filter((_, v: string): bool => v =~ '/')
-        ->map((_, v: string): string =>
+        ->map((_, v: string) =>
                 '-ipath '
                 # Why replacing the current working directory with a dot?{{{
                 #
