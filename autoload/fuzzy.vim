@@ -1763,7 +1763,7 @@ enddef
 def Uniq(list: list<string>): list<string> #{{{2
     var visited: dict<bool>
     var ret: list<string>
-    for path in list
+    for path: string in list
         if !empty(path) && !visited->has_key(path)
             ret->add(path)
             visited[path] = true
