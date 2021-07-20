@@ -945,7 +945,13 @@ enddef
 def MaybeUpdatePopups() #{{{2
 # Purpose: Don't update the popups too often while a source is being computed by
 # numerous job callbacks.
-    elapsed += last_time->reltime()->reltimefloat()
+
+    # https://github.com/vim/vim/issues/8562#issuecomment-880144512
+    if last_time == []
+        elapsed += 0.0
+    else
+        elapsed += last_time->reltime()->reltimefloat()
+    endif
     if elapsed > 0.1
         UpdatePopups()
         elapsed = 0.0
