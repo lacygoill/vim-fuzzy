@@ -674,7 +674,7 @@ def Job_start(cmd: string) #{{{2
 #    - press `SPC ff`
 #}}}
     source_is_being_computed = true
-    myjob = job_start(['/bin/sh', '-c', cmd], {
+    myjob = job_start([&shell, &shellcmdflag, cmd], {
         out_cb: SetIntermediateSource,
         close_cb: SetFinalSource,
         mode: 'raw',
