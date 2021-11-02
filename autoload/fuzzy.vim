@@ -294,11 +294,7 @@ def fuzzy#main(type: string, input = '') #{{{2
         # the popup  menu; instead,  they are used  for the  terminal scrollback
         # buffer.
         #
-        # This  is confusing.   Besides,  `popup_menu()` automatically  disables
-        # mappings   (it's  as   if   you  had   passed   `mapping:  false`   to
-        # `popup_create()`);  this  breaks  the  dynamic  colors  of  our  popup
-        # terminal,  because pressing  `i`  to enter  Terminal-Job mode  doesn't
-        # trigger anymore our custom mapping which fires `User TermEnter`.
+        # This is confusing.
         #}}}
         Error('vim-fuzzy: Cannot start while a popup terminal is active')
         return
@@ -796,7 +792,7 @@ def SetFinalSource(_) #{{{2
     # But in  `vim-man`, if  we use  `close_cb` instead  of `exit_cb`,  we still
     # sometimes have an issue where the end of a manpage is truncated.
     # `sleep 1m` fixes that issue.  Which  probably means that not all callbacks
-    # have been processed when `close_cb` runs it callback.  **Why?**
+    # have been processed when `close_cb` runs its callback.  **Why?**
     # Is the explanation given at `:help close_cb`?:
     #
     #    > However, if a  callback causes Vim to check for  messages, the close_cb
