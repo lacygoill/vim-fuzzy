@@ -1463,6 +1463,9 @@ def PreviewHighlight(info: dict<string>) #{{{3
     endif
 
     def Prettify()
+        # some syntax plugins wrongly alter 'iskeyword'; that might break
+        # a keyword syntax rule (as well as the `\<` and `\>` atoms)
+        var reset_isk: string = 'setlocal iskeyword&vim'
         # Why clearing the syntax first?{{{
         #
         # Suppose the previous file which was previewed was a Vim file.
@@ -1493,7 +1496,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
         var whereAmI: string = sourcetype == 'Commands' || sourcetype =~ '^Mappings'
             ? '&l:cursorline = true'
             : ''
-        win_execute(preview_winid, [setsyntax, fullconceal, unfold, whereAmI])
+        win_execute(preview_winid, [reset_isk, setsyntax, fullconceal, unfold, whereAmI])
     enddef
 
     # syntax highlight the text
