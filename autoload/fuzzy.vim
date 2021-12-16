@@ -865,7 +865,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         return true
 
     # select a neighboring line
-    elseif index(["\<Down>", "\<Up>", "\<C-N>", "\<C-P>"], key) >= 0
+    elseif ["\<Down>", "\<Up>", "\<C-N>", "\<C-P>"]->index(key) >= 0
         var curline: number = line('.', menu_winid)
         var lastline: number = line('$', menu_winid)
         # No need to update the popup if we try to move beyond the first/last line.{{{
@@ -875,8 +875,8 @@ def PopupFilter(id: number, key: string): bool #{{{2
         # `C-n` or `C-p` for a bit too long.  Note that `id` (function argument)
         # and `menu_winid` (script local) have the same value.
         #}}}
-        if index(["\<Up>", "\<C-P>"], key) >= 0 && curline == 1
-        || index(["\<Down>", "\<C-N>"], key) >= 0 && curline == lastline
+        if ["\<Up>", "\<C-P>"]->index(key) >= 0 && curline == 1
+        || ["\<Down>", "\<C-N>"]->index(key) >= 0 && curline == lastline
             return true
         endif
 
@@ -918,7 +918,7 @@ def PopupFilter(id: number, key: string): bool #{{{2
         ToggleSelectedRegisterType()
         return true
 
-    elseif index(["\<C-S>", "\<C-T>", "\<C-V>"], key) >= 0
+    elseif ["\<C-S>", "\<C-T>", "\<C-V>"]->index(key) >= 0
         popup_close(menu_winid, {
             howtoopen: {
                 ["\<C-S>"]: 'insplit',
@@ -1397,7 +1397,7 @@ def ExtractInfo(line: string): dict<string> #{{{3
         splitted = line->split('\t\+')
     endif
 
-    if index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
+    if ['Files', 'Locate', 'RecentFiles']->index(sourcetype) >= 0
         if splitted->len() != 1
             return {}
         else
@@ -1522,7 +1522,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
         Prettify()
         popup_setoptions(preview_winid, {title: ' ' .. filename})
 
-    elseif index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
+    elseif ['Files', 'Locate', 'RecentFiles']->index(sourcetype) >= 0
         Prettify()
         if sourcetype == 'Locate'
             popup_setoptions(preview_winid, {title: ' ' .. filename->fnamemodify(':t')})
@@ -1601,7 +1601,7 @@ def ExitCallback( #{{{2
         # See also:
         # https://github.com/vim/vim/issues/7178#issuecomment-714442958
         #}}}
-        if index(['Files', 'Locate', 'RecentFiles'], sourcetype) >= 0
+        if ['Files', 'Locate', 'RecentFiles']->index(sourcetype) >= 0
             Open(chosen, howtoopen)
 
         elseif type == 'Grep'
