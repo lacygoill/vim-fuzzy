@@ -1933,4 +1933,3 @@ def ToggleSelectedRegisterType() #{{{2
     # finally, we can refresh the popup menu
     UpdateMainText()
 enddef
-
