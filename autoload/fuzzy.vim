@@ -710,7 +710,7 @@ def SetIntermediateSource(_, argdata: string) #{{{2
     # `BailOutIfTooBig()`, ...).
     #
     # As a  test, enter a  directory with a  lot of files  (e.g. `$HOME`), press
-    # `SPC ff`, then `ESC`.  No error should ever be raised; such as this one:
+    # `SPC ff`, then `ESC`.  No error should ever be given; such as this one:
     #
     #     E684: list index out of range: 1
     #}}}
@@ -765,7 +765,7 @@ enddef
 def SetFinalSource(_) #{{{2
     # TODO: In the past we needed a `sleep 1m` here.{{{
     #
-    # That was necessary to avoid an error raised when evaluating `parts[1]`:
+    # That was necessary to avoid an error given when evaluating `parts[1]`:
     #
     #     E684: list index out of range: 1
     #
@@ -965,7 +965,7 @@ def UpdatePopups(main_text = true) #{{{2
             #
             # It would cause the exit callback  to be invoked, which would cause
             # `Clean()` to be invoked, which would cause the exit callback to be
-            # invoked... which would raise `E132`:
+            # invoked... which would give `E132`:
             #
             #     E132: Function call depth is higher than 'maxfuncdepth'
             #}}}
@@ -1478,7 +1478,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
         #}}}
         # `silent!` to suppress a possible error.{{{
         #
-        # Such as the ones raised here:
+        # Such as the ones given here:
         #
         #     $ vim --clean --cmd 'let mapleader = "\<S-F5>"' /tmp/file.adb
         #     E329: No menu "PopUp"˜
@@ -1575,9 +1575,9 @@ def ExitCallback( #{{{2
 
         # The cursor is wrongly moved 1 line down when I press Enter!{{{
         #
-        # Maybe an error  is raised somewhere (not necessarily  from the current
+        # Maybe an  error is given  somewhere (not necessarily from  the current
         # function; it could be due to a triggered autocmd defined elsewhere).
-        # And if an error is raised, `Enter` is not discarded.
+        # And if an error is given, `Enter` is not discarded.
         # From `:help popup-filter-errors`:
         #
         #    > If the filter causes an error then it is assumed to return zero.
@@ -1593,7 +1593,7 @@ def ExitCallback( #{{{2
         #    - the current function fires an event
         #    - the event triggers an autocmd
         #    - the autocmd calls a legacy function
-        #    - the legacy function executes a command which raises an error
+        #    - the legacy function executes a command which gives an error
         #
         # `Enter` won't be discarded; even if the error is suppressed or caught.
         # But I *think* it will be fixed in the future.
@@ -1848,14 +1848,14 @@ enddef
 def ExpandTilde(path: string): string #{{{2
     # Why don't you simply use `expand()`?{{{
     #
-    # It expands too much, and might raise unexpected errors.
+    # It expands too much, and might give unexpected errors.
     # For example:
     #
     #     echo expand('~/[a-1]/file.txt')
     #     E944: Reverse range in character class˜
     #
     # Even though  `[a-1]` is an ugly  directory name, it's still  valid, and no
-    # error should be raised.
+    # error should be given.
     #}}}
     return path->substitute('^\~/', $HOME .. '/', '')
 enddef

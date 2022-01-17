@@ -22,24 +22,24 @@ command! -bar -nargs=? FzGrep fuzzy#main('Grep', <q-args>)
 command! -bar -nargs=? FzHelpTags fuzzy#main('HelpTags', <q-args>)
 command! -bar -nargs=? FzLocate fuzzy#main('Locate', <q-args>)
 
-nnoremap <unique> <Space>fc <Cmd>call fuzzy#main('Commands')<CR>
-nnoremap <unique> <Space>ff <Cmd>call fuzzy#main('Files')<CR>
-nnoremap <unique> <Space>fgg <Cmd>call fuzzy#main('Grep')<CR>
-nnoremap <unique> <Space>fh <Cmd>call fuzzy#main('HelpTags')<CR>
+nnoremap <unique> <Space>fc <ScriptCmd>fuzzy#main('Commands')<CR>
+nnoremap <unique> <Space>ff <ScriptCmd>fuzzy#main('Files')<CR>
+nnoremap <unique> <Space>fgg <ScriptCmd>fuzzy#main('Grep')<CR>
+nnoremap <unique> <Space>fh <ScriptCmd>fuzzy#main('HelpTags')<CR>
 # How is `Locate` useful compared to `Files`?{{{
 #
 # `locate(1)` is much faster than `find(1)` and `fd(1)`.
 # And it can find *all* the files, not just the ones in the cwd.
 #}}}
-nnoremap <unique> <Space>fl <Cmd>call fuzzy#main('Locate')<CR>
+nnoremap <unique> <Space>fl <ScriptCmd>fuzzy#main('Locate')<CR>
 
-nnoremap <unique> <Space>fmn <Cmd>call fuzzy#main('Mappings (n)')<CR>
-nnoremap <unique> <Space>fmx <Cmd>call fuzzy#main('Mappings (x)')<CR>
-nnoremap <unique> <Space>fmi <Cmd>call fuzzy#main('Mappings (i)')<CR>
-nnoremap <unique> <Space>fmo <Cmd>call fuzzy#main('Mappings (o)')<CR>
+nnoremap <unique> <Space>fmn <ScriptCmd>fuzzy#main('Mappings (n)')<CR>
+nnoremap <unique> <Space>fmx <ScriptCmd>fuzzy#main('Mappings (x)')<CR>
+nnoremap <unique> <Space>fmi <ScriptCmd>fuzzy#main('Mappings (i)')<CR>
+nnoremap <unique> <Space>fmo <ScriptCmd>fuzzy#main('Mappings (o)')<CR>
 
-nnoremap <unique> <Space>fr <Cmd>call fuzzy#main('RecentFiles')<CR>
+nnoremap <unique> <Space>fr <ScriptCmd>fuzzy#main('RecentFiles')<CR>
 
-nnoremap <unique> "<C-F> <Cmd>call fuzzy#main('Registers"')<CR>
-nnoremap <unique> @<C-F> <Cmd>call fuzzy#main('Registers@')<CR>
-inoremap <unique> <C-R><C-F> <Cmd>call fuzzy#main('Registers<C-R>')<CR>
+nnoremap <unique> "<C-F> <ScriptCmd>fuzzy#main('Registers"')<CR>
+nnoremap <unique> @<C-F> <ScriptCmd>fuzzy#main('Registers@')<CR>
+inoremap <unique> <C-R><C-F> <ScriptCmd>fuzzy#main('Registers<C-R>')<CR>
