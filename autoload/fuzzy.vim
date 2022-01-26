@@ -70,8 +70,8 @@ vim9script noclear
 #}}}
 # TODO: Implement `:FzUnichar`.{{{
 #
-# Check out `unichar#complete#fuzzy()`.
-# Or maybe we should just invoke `fuzzy#main()` from `vim-unichar`?
+# Check out `unichar#complete#Fuzzy()`.
+# Or maybe we should just invoke `fuzzy.Main()` from `vim-unichar`?
 #}}}
 # TODO: Implement `:FzCommits`; git commits.
 # TODO: Implement `:FzBCommits`; git commits for the current buffer.
@@ -236,7 +236,7 @@ var source_is_being_computed: bool = false
 var sourcetype: string
 
 # Interface {{{1
-def fuzzy#main(type: string, input = '') #{{{2
+export def Main(type: string, input = '') #{{{2
     # Without this reset, we might wrongly re-use a stale source.{{{
     #
     #     $ cd && vim
