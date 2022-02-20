@@ -270,7 +270,7 @@ export def Main(type: string, input = '') #{{{2
     if &buftype == 'terminal' && win_gettype() == 'popup'
         # We cannot interact with a popup menu while a popup terminal is active.{{{
         #
-        #     term_start(&shell, {hidden: true})
+        #     term_start($SHELL, {hidden: true})
         #         ->popup_create({
         #             border: [],
         #             maxheight: &lines / 3,
@@ -278,7 +278,7 @@ export def Main(type: string, input = '') #{{{2
         #             zindex: 50 - 1,
         #         })
         #     range(&lines - 5)
-        #         ->mapnew((_, v) => string(v))
+        #         ->map((_, v) => string(v))
         #         ->popup_create({
         #             cursorline: true,
         #             filter: 'popup_filter_menu',
@@ -476,10 +476,10 @@ def InitCommandsOrMappings() #{{{2
     source = execute(cmd)
         # remove first empty lines
         ->substitute('^\%(\s*\n\)*', '', '')
-        # split after every "Last set from ..." line
+        # split after every “Last set from ...” line
         ->split('\n\s*Last set from [^\n]* line \d\+\zs\n')
         # transform each pair of lines into a dictionary
-        ->mapnew((_, v: string): dict<string> => ({
+        ->map((_, v: string): dict<string> => ({
             text: v->matchstr(relevant)->substitute(noise, '', ''),
             # `matchstr()` extracts the filename.{{{
             #
@@ -637,7 +637,7 @@ def InitRegisters() #{{{2
         ->execute()
         ->split('\n')[1 :]
         ->map((_, v: string) => v->matchstr('^  [lbc]  "\zs\S'))
-        ->mapnew((_, v: any): dict<string> => ({
+        ->map((_, v: string): dict<string> => ({
             text: getreg(v, true, true)->join('^J'),
             header: printf('%s  "%s   ', {v: 'c', V: 'l'}->get(getregtype(v), 'b'), v),
             trailer: '',
@@ -735,13 +735,13 @@ def SetIntermediateSource(_, argdata: string) #{{{2
     #
     # For example, if we're  looking for a help tag, we  probably don't want our
     # typed text  to be matched against  the filename.  Otherwise, we  might get
-    # too many irrelevant results (test with the pattern "changes").
+    # too many irrelevant results (test with the pattern `changes`).
     #}}}
     if sourcetype == 'HelpTags'
         splitted_data
             ->mapnew((_, v: string): list<string> => v->split('\t'))
-            ->mapnew((_, v: list<string>): dict<string> =>
-                        ({text: v[0], trailer: v[1], location: ''}))
+            ->map((_, v: list<string>): dict<string> =>
+                    ({text: v[0], trailer: v[1], location: ''}))
             ->AppendSource()
     else
         # TODO: For `Grep`, our filtering text is also matched against the filepath.
@@ -1076,11 +1076,11 @@ def UpdateMainText() #{{{2
         # Tip: To check how `fzf(1)` handles this issue, try this:
         #
         #     $ locate / | fzf
-        #     # type "aka"
+        #     # type: aka
         #
-        # Right now "aka" matches this filename:
+        # Right now `aka` matches this filename:
         #
-        #     ~/.vim/tmp/undo/%home%jean%Downloads%XDCC%The Expanse - Complete Season 1 S01 - 720p HDTV x264%Episodes%Subtitles%The Expanse - S01 E04 - CQB aka Close Quarters Battle.srt
+        #     ~/.vim/tmp/undo/%home%lgc%Downloads%XDCC%The Expanse - Complete Season 1 S01 - 720p HDTV x264%Episodes%Subtitles%The Expanse - S01 E04 - CQB aka Close Quarters Battle.srt
         #
         # Which is the longest filename on our system; found with:
         #
@@ -1133,7 +1133,7 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
             ->slice(0, POPUP_MAXLINES)
             # No need to process *all* the matches.
             # The popup can only display a limited amount of them.
-            ->mapnew(InjectTextProps(pos, scores))
+            ->map(InjectTextProps(pos, scores))
         # `filtered_source` needs  to be  updated now, so  that `ExitCallback()`
         # works as expected later (i.e. can determine which entry we've chosen).
         filtered_source += matches
@@ -1169,7 +1169,7 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
     else
         return lines
             ->slice(0, POPUP_MAXLINES)
-            ->mapnew(InjectTextProps())
+            ->map(InjectTextProps())
     endif
 enddef
 
@@ -1406,7 +1406,7 @@ def ExtractInfo(line: string): dict<string> #{{{3
     elseif sourcetype == 'HelpTags'
         return {
             tagname: splitted[0]->trim()->substitute("'", "''", 'g')->escape('\'),
-            # Why passing "true, true" as argument to `globpath()`?{{{
+            # Why passing `true, true` as argument to `globpath()`?{{{
             #
             # The  first  `true` can  be  useful  if  for  some reason  `'suffixes'`  or
             # `'wildignore'` are misconfigured.
@@ -1762,7 +1762,7 @@ def BuflistedSorted(): list<string> #{{{2
             : a.lastused == b.lastused
             ?     b.bufnr - a.bufnr
             :    -1
-        )->mapnew((_, v: dict<number>): string => bufname(v.bufnr))
+        )->map((_, v: dict<number>): string => bufname(v.bufnr))
 enddef
 
 def Uniq(list: list<string>): list<string> #{{{2
