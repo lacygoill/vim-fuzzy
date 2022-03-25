@@ -659,7 +659,7 @@ def Job_start(cmd: string) #{{{2
 # without the exit callback being invoked?
 #
 # Update: I think I can reproduce the issue even without the timer(s).
-# Find a MWE:
+# Find a MRE:
 #
 #    - run this command in a separate tmux pane:
 #
