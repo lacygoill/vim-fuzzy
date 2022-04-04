@@ -3,7 +3,7 @@ vim9script noclear
 if exists('loaded') | finish | endif
 var loaded = true
 
-import autoload 'fuzzy.vim'
+import autoload '../autoload/fuzzy.vim'
 
 # TODO: For each mapping, implement the counterpart Ex command.
 # It would be especially useful for huge sources.
