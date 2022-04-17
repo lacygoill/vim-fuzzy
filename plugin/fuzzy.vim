@@ -25,16 +25,16 @@ command! -bar -nargs=? FzHelpTags fuzzy.Main('HelpTags', <q-args>)
 command!      -nargs=? FzLocate fuzzy.Main('Locate', <q-args>)
 # Don't use `-bar` for commands whose argument might contain a double quote.
 
-nnoremap <unique> <Space>fc <ScriptCmd>fuzzy.Main('Commands')<CR>
-nnoremap <unique> <Space>ff <ScriptCmd>fuzzy.Main('Files')<CR>
-nnoremap <unique> <Space>fgg <ScriptCmd>fuzzy.Main('Grep')<CR>
-nnoremap <unique> <Space>fh <ScriptCmd>fuzzy.Main('HelpTags')<CR>
+nnoremap <unique> <Space>fc <ScriptCmd>FzCommands<CR>
+nnoremap <unique> <Space>ff <ScriptCmd>FzFiles<CR>
+nnoremap <unique> <Space>fgg <ScriptCmd>FzGrep<CR>
+nnoremap <unique> <Space>fh <ScriptCmd>FzHelpTags<CR>
 # How is `Locate` useful compared to `Files`?{{{
 #
 # `locate(1)` is much faster than `find(1)` and `fd(1)`.
 # And it can find *all* the files, not just the ones in the cwd.
 #}}}
-nnoremap <unique> <Space>fl <ScriptCmd>fuzzy.Main('Locate')<CR>
+nnoremap <unique> <Space>fl <ScriptCmd>FzLocate<CR>
 
 nnoremap <unique> <Space>fmn <ScriptCmd>fuzzy.Main('Mappings (n)')<CR>
 nnoremap <unique> <Space>fmx <ScriptCmd>fuzzy.Main('Mappings (x)')<CR>
@@ -46,3 +46,5 @@ nnoremap <unique> <Space>fr <ScriptCmd>fuzzy.Main('RecentFiles')<CR>
 nnoremap <unique> "<C-F> <ScriptCmd>fuzzy.Main('Registers"')<CR>
 nnoremap <unique> @<C-F> <ScriptCmd>fuzzy.Main('Registers@')<CR>
 inoremap <unique> <C-R><C-F> <ScriptCmd>fuzzy.Main('Registers<C-R>')<CR>
+
+inoremap <unique> <C-G><C-G> <ScriptCmd>fuzzy.Main('Snippets')<CR>

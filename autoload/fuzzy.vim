@@ -44,10 +44,6 @@ vim9script noclear
 # use the new feature to get an editable prompt.
 #}}}
 
-# TODO: Implement `:Snippets`.
-#
-#     echo UltiSnips#SnippetsInCurrentScope()
-
 # TODO: It  would  be convenient  to  be  able  to  scroll horizontally  on  the
 # currently selected line (e.g. with `M-h` and `M-l`).
 # Useful if it's too long to fit entirely on 1 screen line.
@@ -234,6 +230,8 @@ var preview_winid: number = -1
 var source: list<dict<string>>
 var source_is_being_computed: bool = false
 var sourcetype: string
+
+const SNIPPETS_DIR: string = globpath(&rtp, 'UltiSnips')
 
 # Interface {{{1
 export def Main(type: string, input = '') #{{{2
@@ -428,6 +426,9 @@ def InitSource() #{{{2
 
     elseif sourcetype =~ '^Registers'
         InitRegisters()
+
+    elseif sourcetype == 'Snippets'
+        InitSnippets()
     endif
 
     BailOutIfTooBig()
@@ -643,6 +644,18 @@ def InitRegisters() #{{{2
             trailer: '',
             location: '',
          }))
+enddef
+
+def InitSnippets() #{{{2
+    source = UltiSnips#SnippetsInCurrentScope()
+        ->items()
+        ->map((_, item: list<string>) => ({
+            text: item[0],
+            trailer: item[1],
+            matchfuzzy_key: item[0] .. ' ' .. item[1],
+            header: '',
+            location: '',
+        }))
 enddef
 
 def Job_start(cmd: string) #{{{2
@@ -1128,7 +1141,13 @@ def FilterAndHighlight(lines: list<dict<string>>): list<dict<any>> #{{{2
         var matches: list<dict<any>>
         var pos: list<list<number>>
         var scores: list<number>
-        [matches, pos, scores] = matchfuzzypos(lines, filter_text, {key: 'text'})
+        [matches, pos, scores] = matchfuzzypos(
+            lines,
+            filter_text,
+            lines->get(0, {})->has_key('matchfuzzy_key')
+            ?     {key: 'matchfuzzy_key'}
+            :     {key: 'text'}
+        )
         matches = matches
             ->slice(0, POPUP_MAXLINES)
             # No need to process *all* the matches.
@@ -1346,6 +1365,10 @@ def UpdatePreview(timerid = 0) #{{{2
         popup_setoptions(preview_winid, {title: ' "' .. info.registername .. ' '})
         popup_settext(preview_winid, getreg(info.registername, true, true))
         return
+    elseif sourcetype == 'Snippets'
+        popup_settext(preview_winid, info.snippet->split('\n'))
+        win_execute(preview_winid, 'doautocmd Syntax snippets')
+        return
     endif
 
     var filename: string = info.filename
@@ -1393,6 +1416,40 @@ def ExtractInfo(line: string): dict<string> #{{{3
             ->split('.*\zs:')
     elseif sourcetype =~ '^Registers'
         return {registername: line->matchstr('"\zs.')}
+    elseif sourcetype == 'Snippets'
+        var snippets_files: list<string> = [SNIPPETS_DIR .. '/' .. &filetype .. '.snippets']
+            + [SNIPPETS_DIR .. '/all.snippets']
+        var trigger: string = line->matchstr('\S\+')
+        if trigger == ''
+            return {}
+        endif
+        var snippet: list<string>
+        var lines: list<string>
+        if snippets_files[0]->filereadable()
+            lines += snippets_files[0]->readfile()
+        endif
+        if snippets_files[1]->filereadable()
+            lines += snippets_files[1]->readfile()
+        endif
+        if lines->empty()
+            return {}
+        endif
+        var started: bool
+        for l: string in lines
+            if l =~ '^\s*snippet\s\+' .. trigger
+                started = true
+            elseif started && l =~ '^\s*endsnippet\s*$'
+                break
+            endif
+            if started
+                snippet += [l]
+            endif
+        endfor
+        if snippet->empty()
+            return {}
+        endif
+        snippet += ['endsnippet']
+        return {snippet: snippet->join("\n")}
     else
         splitted = line->split('\t\+')
     endif
@@ -1615,6 +1672,14 @@ def ExitCallback( #{{{2
                 ->get('location')
                 ->matchlist('Last set from \(.*\) line \(\d\+\)$')
                 ->Open(howtoopen)
+
+        elseif type == 'Snippets'
+            var keys: string
+            if col('.') == col('$') && getline('.') != ''
+                keys = ' '
+            endif
+            keys ..= chosen
+            feedkeys(keys)
         endif
         normal! zv
     catch
