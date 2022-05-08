@@ -268,7 +268,7 @@ export def Main(type: string, input = '') #{{{2
     if &buftype == 'terminal' && win_gettype() == 'popup'
         # We cannot interact with a popup menu while a popup terminal is active.{{{
         #
-        #     term_start($SHELL, {hidden: true})
+        #     term_start($INTERACTIVE_SHELL ?? &shell, {hidden: true})
         #         ->popup_create({
         #             border: [],
         #             maxheight: &lines / 3,
@@ -1367,7 +1367,7 @@ def UpdatePreview(timerid = 0) #{{{2
         return
     elseif sourcetype == 'Snippets'
         popup_settext(preview_winid, info.snippet->split('\n'))
-        win_execute(preview_winid, 'doautocmd Syntax snippets')
+        win_execute(preview_winid, 'ownsyntax snippets')
         return
     endif
 
@@ -1560,7 +1560,7 @@ def PreviewHighlight(info: dict<string>) #{{{3
     if sourcetype == 'HelpTags'
         var setsyntax: list<string> =<< trim END
             if get(b:, 'current_syntax', '') != 'help'
-            doautocmd Syntax help
+                ownsyntax help
             endif
         END
         var searchcmd: string = printf("echo search('\\*\\V%s\\m\\*', 'n')", tagname)
