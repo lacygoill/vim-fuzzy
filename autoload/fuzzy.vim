@@ -355,7 +355,7 @@ export def Main(type: string, input = '') #{{{2
     # create popup menu
     menu_winid = popup_menu('', opts)
     menu_buf = winbufnr(menu_winid)
-    prop_type_add('fuzzyMatch', {bufnr: menu_buf, highlight: 'Title', combine: false})
+    prop_type_add('fuzzyMatch', {bufnr: menu_buf, highlight: 'IncSearch', combine: false})
     prop_type_add('fuzzyHeader', {bufnr: menu_buf, highlight: 'Comment', combine: false})
     prop_type_add('fuzzyTrailer', {bufnr: menu_buf, highlight: 'Comment', combine: false})
 
@@ -406,7 +406,7 @@ def InitSource() #{{{2
         # Unless you want something special.
         # General settings should be written in: `~/.config/ripgreprc`.
         #}}}
-        var cmd: string = executable('rg') ? "rg '.*' ." : 'grep -RHIins'
+        var cmd: string = executable('rg') ? "rg --line-number '.*' ." : 'grep -RHIins'
         Job_start(cmd)
 
     elseif sourcetype == 'HelpTags'
@@ -562,7 +562,7 @@ def GetHelpTagsCmd(): string #{{{2
         # It makes perl iterate over the input lines somewhat like awk.
         #
         # See `man perlrun /^\s*-n`.
-        # This manpage is provided by the `perl-doc` package.
+        # This man page is provided by the `perl-doc` package.
         #}}}
         #   `-e`{{{
         #
@@ -652,7 +652,15 @@ def InitSnippets() #{{{2
         ->map((_, item: list<string>) => ({
             text: item[0],
             trailer: item[1],
-            matchfuzzy_key: item[0] .. ' ' .. item[1],
+            matchfuzzy_key:
+                # Let's ignore the tab trigger, which can be a meaningless abbreviation.{{{
+                #
+                # We can't just remove it,  because it would break the positions
+                # of the  highlighted matched characters.  Instead,  we erase it
+                # with spaces.
+                #}}}
+                item[0]->substitute('.', ' ', 'g')
+                .. ' ' .. item[1],
             header: '',
             location: '',
         }))
@@ -803,7 +811,7 @@ def SetFinalSource(_) #{{{2
     #    > be passed to the callbacks.
     #
     # But in  `vim-man`, if  we use  `close_cb` instead  of `exit_cb`,  we still
-    # sometimes have an issue where the end of a manpage is truncated.
+    # sometimes have an issue where the end of a man page is truncated.
     # `sleep 1m` fixes that issue.  Which  probably means that not all callbacks
     # have been processed when `close_cb` runs its callback.  **Why?**
     # Is the explanation given at `:help close_cb`?:
@@ -1775,9 +1783,8 @@ enddef
 def EchoSourceAndFilterText() #{{{2
     echohl ModeMsg
     echo sourcetype->substitute('\l\zs\ze\u', ' ', 'g') .. ': '
-    echohl Title
-    echon filter_text
     echohl NONE
+    echon filter_text
 enddef
 
 def UtilityIsMissing(): bool #{{{2
