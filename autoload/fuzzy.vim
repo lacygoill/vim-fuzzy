@@ -89,7 +89,7 @@ vim9script noclear
 # TODO: Sometimes `Locate` is much slower than usual (from 8s to ≈ 45s).
 # And sometimes, `$ locate /` is much slower than usual (from .5s to 4s).
 # What's going on?
-# And btw, why is `Locate` so slow compared to `locate(1)`?
+# And BTW, why is `Locate` so slow compared to `locate(1)`?
 # I don't think `Files` is that slow compared to `find(1)`.
 # Is it because `Locate` finds much more files?
 
@@ -156,8 +156,8 @@ const MIN_SCORE: number = -5'000
 # Why?  Because moving to  the 5000th one is stupidly slow,  and the whole point
 # of this plugin  is to save time.  To  give you an idea, it takes  about 25s to
 # select the 1000th entry.  That's already too much.  Note that our popup filter
-# lets us  jump to the  end by  pressing `C-g`, so  in practice, the line which
-# is needs the most time to be selected is the 500th one, not the 1000th one.
+# lets us  jump to the  end by  pressing `C-g`, so  in practice, the  line which
+# needs the most time to be selected is the 500th one, not the 1000th one.
 # You'll need approximately 12s to reach it, which looks reasonable.
 #
 # ---
@@ -175,7 +175,7 @@ const POPUP_MAXLINES: number = 100
 
 const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
 
-# Maximum number of lines we're ok for `matchfuzzypos()` to process.{{{
+# Maximum number of lines we're OK for `matchfuzzypos()` to process.{{{
 #
 # We don't want `matchfuzzypos()` to process  too many lines at once, because it
 # might be  slow and block Vim,  while we want  to add some character(s)  to the
@@ -208,13 +208,13 @@ const UPDATEPREVIEW_WAITINGTIME: number = 50
 # Declarations {{{1
 
 var elapsed: float
-var filter_text: string = ''
+var filter_text: string
 var filtered_source: list<dict<any>>
-var hourglass_idx: number = 0
-var incomplete: string = ''
+var hourglass_idx: number
+var incomplete: string
 var job_failed: bool
 var job_started: bool
-var last_filter_text: string = ''
+var last_filter_text: string
 var last_filtered_line: number = -1
 var last_time: list<any>
 var menu_buf: number = -1
@@ -228,10 +228,10 @@ var popups_update_timer: number = -1
 var preview_timer: number = -1
 var preview_winid: number = -1
 var source: list<dict<string>>
-var source_is_being_computed: bool = false
+var source_is_being_computed: bool
 var sourcetype: string
 
-const SNIPPETS_DIR: string = globpath(&rtp, 'UltiSnips')
+const SNIPPETS_DIR: string = globpath(&runtimepath, 'UltiSnips')
 
 # Interface {{{1
 export def Main(type: string, input = '') #{{{2
@@ -306,7 +306,7 @@ export def Main(type: string, input = '') #{{{2
     var statusline: number = (&laststatus == 2 || &laststatus == 1 && winnr('$') >= 2) ? 1 : 0
     var tabline: number = (&showtabline == 2 || &showtabline == 1 && tabpagenr('$') >= 2) ? 1 : 0
     def Offset(): number
-        var offset: number = 0
+        var offset: number
         var necessary: number = 2 * height + BORDERS
         var available: number = &lines - &cmdheight - statusline - tabline
         if necessary > available
@@ -401,12 +401,9 @@ def InitSource() #{{{2
         GetFindCmd()->Job_start()
 
     elseif sourcetype == 'Grep'
-        # You shouldn't need to pass any option to `rg(1)`.{{{
-        #
-        # Unless you want something special.
-        # General settings should be written in: `~/.config/ripgreprc`.
-        #}}}
-        var cmd: string = executable('rg') ? "rg --line-number '.*' ." : 'grep -RHIins'
+        var cmd: string = executable('rg')
+            ? "rg --line-number '.*' ."
+            : 'grep --line-number --with-filename --ignore-case --dereference-recursive --no-messages --binary-files'
         Job_start(cmd)
 
     elseif sourcetype == 'HelpTags'
@@ -1601,7 +1598,7 @@ def ExitCallback( #{{{2
     result: any
 )
     var idx: any = result
-    var howtoopen: string = ''
+    var howtoopen: string
     if typename(result) == 'number' && result <= 0
         # If a job  has been started, and  we want to kill it  by pressing `C-c`
         # because  it takes  too much  time, `job_stop()`  must be  invoked here
