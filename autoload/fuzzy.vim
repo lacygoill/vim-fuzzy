@@ -1222,7 +1222,7 @@ def InjectTextProps( #{{{2
             header: v.header,
             text: v.header .. v.text .. "\<Tab>" .. v.trailer,
             props: [{
-                      col: 0,
+                      col: 1,
                       end_col: v.header->strlen(),
                       type: 'fuzzyHeader',
                     }]
@@ -1260,7 +1260,7 @@ def InjectTextProps( #{{{2
                         type: 'fuzzyMatch',
                     }))
                     + [{
-                         col: 0,
+                         col: 1,
                          end_col: v.header->strlen(),
                          type: 'fuzzyHeader',
                        }]
@@ -1684,9 +1684,19 @@ def ExitCallback( #{{{2
                 keys = ' '
             endif
             keys ..= chosen
+            # open possible folds
+            # Alternatively, you could use `normal! ^Ozv` after `feedkeys()`.{{{
+            #
+            # But in that case, you'll need to delay via a timer.
+            #
+            # Whatever  you do,  make  sure  that an  undesirable  space is  not
+            # sometimes inserted.   Make a test in  a C file, using  the snippet
+            # for a `switch` statement, while the current line is indented (e.g.
+            # inside a function).
+            #}}}
+            keys ..= "\<C-O>zv"
             feedkeys(keys)
         endif
-        normal! zv
     catch
         Error(v:exception)
     finally
