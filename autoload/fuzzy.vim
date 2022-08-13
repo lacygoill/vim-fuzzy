@@ -205,11 +205,14 @@ const TOO_BIG: number = 2'000'000
 
 const UPDATEPREVIEW_WAITINGTIME: number = 50
 
-# Declarations {{{1
+const SNIPPETS_DIR: string = globpath(&runtimepath, 'UltiSnips')
+
+# Init {{{1
 
 var elapsed: float
 var filter_text: string
 var filtered_source: list<dict<any>>
+var hide_cmdline: bool
 var hourglass_idx: number
 var incomplete: string
 var job_failed: bool
@@ -230,8 +233,6 @@ var preview_winid: number = -1
 var source: list<dict<string>>
 var source_is_being_computed: bool
 var sourcetype: string
-
-const SNIPPETS_DIR: string = globpath(&runtimepath, 'UltiSnips')
 
 # Interface {{{1
 export def Main(type: string, input = '') #{{{2
@@ -707,7 +708,7 @@ def Job_start(cmd: string) #{{{2
 
     if job_status(myjob) == 'fail'
         # shorten message to avoid a hit-enter prompt
-        var msg: string = printf('[vim-fuzzy] Failed to run:  %s', cmd)
+        var msg: string = printf('vim-fuzzy: failed to run:  %s', cmd)
         if strcharlen(msg) > (v:echospace + (&cmdheight - 1) * &columns)
             var n: number = v:echospace - 3
             var n1: number = n % 2 ? n / 2 : n / 2 - 1
@@ -1345,7 +1346,7 @@ def UpdateMainTitle() #{{{2
 
     if filtered_everything
         ClearHourGlass()
-        # Do *not* inlude a `return` and move this block at the start of the function.{{{
+        # Do *not* include a `return` and move this block at the start of the function.{{{
         #
         # It would  prevent the title from  updating the index of  the currently
         # selected entry when there is a non-empty filtering text.
@@ -1430,15 +1431,15 @@ def ExtractInfo(line: string): dict<string> #{{{3
         endif
         var snippet: list<string>
         var lines: list<string>
-        if snippets_files[0]->filereadable()
-            lines += snippets_files[0]->readfile()
-        endif
-        if snippets_files[1]->filereadable()
-            lines += snippets_files[1]->readfile()
-        endif
+        for file: string in snippets_files
+            if file->filereadable()
+                lines += file->readfile()
+            endif
+        endfor
         if lines->empty()
             return {}
         endif
+
         var started: bool
         for l: string in lines
             if l =~ '^\s*snippet\s\+' .. trigger
@@ -1766,6 +1767,11 @@ def Reset() #{{{2
     source = []
     source_is_being_computed = false
     sourcetype = ''
+
+    if hide_cmdline
+        hide_cmdline = false
+        &cmdheight = 0
+    endif
 enddef
 #}}}1
 # Utility {{{1
@@ -1788,6 +1794,11 @@ def BailOutIfTooBig() #{{{2
 enddef
 
 def EchoSourceAndFilterText() #{{{2
+    if &cmdheight == 0
+        hide_cmdline = true
+        &cmdheight = 1
+    endif
+
     echohl ModeMsg
     echo sourcetype->substitute('\l\zs\ze\u', ' ', 'g') .. ': '
     echohl NONE
@@ -1878,8 +1889,8 @@ def GetFindCmd(): string #{{{2
     # How does `-prune` work?{{{
     #
     # When the  path of a file  matches the glob preceding  `-prune`, the latter
-    # returns true; as  a result, the rhs  is not evaluated.  But  when the path
-    # does not match,  `-prune` returns false, and the rhs  *is* evaluated.  See
+    # returns true; as  a result, the RHS  is not evaluated.  But  when the path
+    # does not match,  `-prune` returns false, and the RHS  *is* evaluated.  See
     # `man find /^EXAMPLES/;/construct`.
     #}}}
     var cwd: string = getcwd()
