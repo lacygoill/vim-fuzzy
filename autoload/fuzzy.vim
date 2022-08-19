@@ -20,8 +20,8 @@ vim9script noclear
 #
 # Maybe the extra popup could leverage the concept of prompt buffer.
 #
-# Suggestion2: There has been some discussion on Google regarding a feature
-# request originally posted on github:
+# Suggestion2: There  has  been  some  discussion on  the  Google  mailing  list
+# regarding a feature request originally posted on GitHub:
 # https://github.com/vim/vim/issues/5639
 # https://groups.google.com/g/vim_dev/c/42DjcXhuVAE/m/8yzxkBysAQAJ
 #
@@ -249,8 +249,8 @@ export def Main(type: string, input = '') #{{{2
     #
     # It's true  that we invoke  `Clean()` from `ExitCallback()`;  and `Clean()`
     # does indeed invoke `Reset()`.
-    # However, when you  press exit the main popup before  the job has finished,
-    # some of its callbacks can still be invoked and set `source`.
+    # However, when you exit the main popup before the job has finished, some of
+    # its callbacks can still be invoked and set `source`.
     #}}}
     # Make sure to reset as early as possible.{{{
     #
@@ -1680,11 +1680,20 @@ def ExitCallback( #{{{2
                 ->Open(howtoopen)
 
         elseif type == 'Snippets'
-            var keys: string
-            if col('.') == col('$') && getline('.') != ''
-                keys = ' '
-            endif
-            keys ..= chosen
+            # In the past we first inserted a space at the end of a non-empty line:{{{
+            #
+            #     var keys: string
+            #     if col('.') == col('$') && getline('.') != ''
+            #         keys = ' '
+            #     endif
+            #     keys ..= chosen
+            #
+            # Not sure why.
+            # But  it caused  an issue  in  python scripts.   For example,  when
+            # expanding a  `for` loop  inside an outer  `if`, `for`  was wrongly
+            # indented 1 character too far to the right.
+            #}}}
+            var keys: string = chosen
             # open possible folds
             # Alternatively, you could use `normal! ^Ozv` after `feedkeys()`.{{{
             #
