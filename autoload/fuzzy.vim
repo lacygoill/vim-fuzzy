@@ -837,7 +837,7 @@ def SetFinalSource(_) #{{{2
     if sourcetype == ''
         return
     endif
-    # the last line of the shell ouput ends with an undesirable trailing newline
+    # the last line of the shell output ends with an undesirable trailing newline
     incomplete = incomplete->trim("\n", 2)
     if sourcetype == 'HelpTags'
         var parts: list<string> = incomplete->split('\t')
@@ -1448,13 +1448,13 @@ def ExtractInfo(line: string): dict<string> #{{{3
                 break
             endif
             if started
-                snippet += [l]
+                snippet->add(l)
             endif
         endfor
         if snippet->empty()
             return {}
         endif
-        snippet += ['endsnippet']
+        snippet->add('endsnippet')
         return {snippet: snippet->join("\n")}
     else
         splitted = line->split('\t\+')
