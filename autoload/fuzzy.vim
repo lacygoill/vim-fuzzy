@@ -427,6 +427,9 @@ def InitSource() #{{{2
 
     elseif sourcetype == 'Snippets'
         InitSnippets()
+
+    elseif sourcetype == 'Commits Messages'
+        InitCommitMessages()
     endif
 
     BailOutIfTooBig()
@@ -661,6 +664,24 @@ def InitSnippets() #{{{2
                 .. ' ' .. item[1],
             header: '',
             location: '',
+        }))
+enddef
+
+def InitCommitMessages() #{{{2
+    if getenv('COMMIT_MESSAGES_DIR') == null
+        source = []
+        return
+    endif
+
+    var msg_files: list<string> = readdir($COMMIT_MESSAGES_DIR)
+    msg_files->remove(msg_files->index('checksums'))
+    source = msg_files
+        ->copy()
+        ->map((_, fname: string): dict<string> => ({
+            text: $'{$COMMIT_MESSAGES_DIR}/{fname}'->readfile()->get(0, ''),
+            trailer: '',
+            header: '',
+            location: $'{$COMMIT_MESSAGES_DIR}/{fname}',
         }))
 enddef
 
@@ -1364,16 +1385,17 @@ def UpdatePreview(timerid = 0) #{{{2
         return
     endif
 
-    var info: dict<string> = line->ExtractInfo()
+    var info: dict<any> = line->ExtractInfo()
     if empty(info)
         return
     elseif sourcetype =~ '^Registers'
         popup_setoptions(preview_winid, {title: ' "' .. info.registername .. ' '})
         popup_settext(preview_winid, getreg(info.registername, true, true))
         return
-    elseif sourcetype == 'Snippets'
-        popup_settext(preview_winid, info.snippet->split('\n'))
-        win_execute(preview_winid, 'ownsyntax snippets')
+    elseif sourcetype == 'Snippets' || sourcetype == 'Commits Messages'
+        popup_settext(preview_winid, info.text)
+        win_execute(preview_winid,
+            $'ownsyntax {sourcetype == 'Snippets' ? 'snippets' : 'gitcommit'}')
         return
     endif
 
@@ -1399,7 +1421,7 @@ def UpdatePreview(timerid = 0) #{{{2
     PreviewHighlight(info)
 enddef
 
-def ExtractInfo(line: string): dict<string> #{{{3
+def ExtractInfo(line: string): dict<any> #{{{3
     if sourcetype == 'Commands' || sourcetype =~ '^Mappings'
         var matchlist: list<string> = (filtered_source ?? source)
             ->get(line('.', menu_winid) - 1, {})
@@ -1420,8 +1442,10 @@ def ExtractInfo(line: string): dict<string> #{{{3
             # remove text; only keep filename and line number
             ->matchstr('^.\{-}:\d\+\ze:')
             ->split('.*\zs:')
+
     elseif sourcetype =~ '^Registers'
         return {registername: line->matchstr('"\zs.')}
+
     elseif sourcetype == 'Snippets'
         var snippets_files: list<string> = [SNIPPETS_DIR .. '/' .. &filetype .. '.snippets']
             + [SNIPPETS_DIR .. '/all.snippets']
@@ -1455,7 +1479,17 @@ def ExtractInfo(line: string): dict<string> #{{{3
             return {}
         endif
         snippet->add('endsnippet')
-        return {snippet: snippet->join("\n")}
+        return {text: snippet}
+
+    elseif sourcetype == 'Commits Messages'
+        var msg_file: string = (filtered_source ?? source)
+            ->get(line('.', menu_winid) - 1, {})
+            ->get('location', '')
+        if msg_file == ''
+            return {}
+        endif
+        return {text: msg_file->readfile()}
+
     else
         splitted = line->split('\t\+')
     endif
@@ -1706,12 +1740,38 @@ def ExitCallback( #{{{2
             #}}}
             keys ..= "\<C-O>zv"
             feedkeys(keys)
+
+        elseif type == 'Commits Messages'
+            PutCommitMessage(idx)
         endif
     catch
         Error(v:exception)
     finally
         Clean()
     endtry
+enddef
+
+def PutCommitMessage(idx: number) #{{{2
+    var msg_file: string = get(filtered_source ?? source, idx - 1, {})
+        ->get('location', '')
+
+    if !msg_file->filereadable()
+        return
+    endif
+
+    cursor(1, 1)
+    var msg_last_line: number = search('^#', 'nW', 0, 0,
+        () => synstack('.', col('.'))
+        ->map((_, n: number) => n->synIDattr('name'))
+        ->match('gitcommitComment') == -1)
+
+    if msg_last_line == 0
+        return
+    endif
+
+    deletebufline(bufnr('%'), 1, msg_last_line - 1)
+    (msg_file->readfile() + [''])->append(0)
+    cursor(1, 1)
 enddef
 
 def Open(matchlist: any, how: string) #{{{2

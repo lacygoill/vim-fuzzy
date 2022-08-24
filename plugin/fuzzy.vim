@@ -48,3 +48,8 @@ nnoremap <unique> @<C-F> <ScriptCmd>fuzzy.Main('Registers@')<CR>
 inoremap <unique> <C-R><C-F> <ScriptCmd>fuzzy.Main('Registers<C-R>')<CR>
 
 inoremap <unique> <C-G><C-G> <ScriptCmd>fuzzy.Main('Snippets')<CR>
+
+augroup FuzzyCommitMessages
+    autocmd!
+    autocmd FileType gitcommit nnoremap <buffer><nowait> <Space>fmm <ScriptCmd>fuzzy.Main('Commits Messages')<CR>
+augroup END
