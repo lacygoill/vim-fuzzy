@@ -1760,7 +1760,7 @@ def PutCommitMessage(idx: number) #{{{2
     endif
 
     cursor(1, 1)
-    var msg_last_line: number = search('^#', 'nW', 0, 0,
+    var msg_last_line: number = search('^#', 'cnW', 0, 0,
         () => synstack('.', col('.'))
         ->map((_, n: number) => n->synIDattr('name'))
         ->match('gitcommitComment') == -1)
@@ -1769,7 +1769,9 @@ def PutCommitMessage(idx: number) #{{{2
         return
     endif
 
-    deletebufline(bufnr('%'), 1, msg_last_line - 1)
+    if msg_last_line > 1
+        deletebufline(bufnr('%'), 1, msg_last_line - 1)
+    endif
     (msg_file->readfile() + [''])->append(0)
     cursor(1, 1)
 enddef
