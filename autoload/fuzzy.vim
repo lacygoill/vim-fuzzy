@@ -123,9 +123,6 @@ vim9script noclear
 
 # Config {{{1
 
-# 2 popups = 4 borders
-const BORDERS: number = 4
-
 const HOURGLASS_CHARS: list<string> = ['―', '\', '|', '/']
 
 # when filtering, ignore matches with a  too low score (the lower this variable,
@@ -175,6 +172,8 @@ const POPUP_MAXLINES: number = 100
 
 const PREVIEW_MAXSIZE: float = 5 * pow(2, 20)
 
+const SNIPPETS_DIR: string = globpath(&runtimepath, 'UltiSnips')
+
 # Maximum number of lines we're OK for `matchfuzzypos()` to process.{{{
 #
 # We don't want `matchfuzzypos()` to process  too many lines at once, because it
@@ -205,9 +204,10 @@ const TOO_BIG: number = 2'000'000
 
 const UPDATEPREVIEW_WAITINGTIME: number = 50
 
-const SNIPPETS_DIR: string = globpath(&runtimepath, 'UltiSnips')
-
 # Init {{{1
+
+# 2 popups = 4 borders
+const BORDERS: number = 4
 
 var elapsed: float
 var filter_text: string
