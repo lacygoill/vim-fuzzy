@@ -212,7 +212,6 @@ const BORDERS: number = 4
 var elapsed: float
 var filter_text: string
 var filtered_source: list<dict<any>>
-var hide_cmdline: bool
 var hourglass_idx: number
 var incomplete: string
 var job_failed: bool
@@ -1838,11 +1837,6 @@ def Reset() #{{{2
     source = []
     source_is_being_computed = false
     sourcetype = ''
-
-    if hide_cmdline
-        hide_cmdline = false
-        &cmdheight = 0
-    endif
 enddef
 #}}}1
 # Utility {{{1
@@ -1865,11 +1859,6 @@ def BailOutIfTooBig() #{{{2
 enddef
 
 def EchoSourceAndFilterText() #{{{2
-    if &cmdheight == 0
-        hide_cmdline = true
-        &cmdheight = 1
-    endif
-
     echohl ModeMsg
     echo sourcetype->substitute('\l\zs\ze\u', ' ', 'g') .. ': '
     echohl NONE
