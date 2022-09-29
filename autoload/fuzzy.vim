@@ -2045,7 +2045,7 @@ def HourGlass(): string #{{{2
     var char: string = HOURGLASS_CHARS[hourglass_idx]
     ++hourglass_idx
     if hourglass_idx >= len(HOURGLASS_CHARS)
-      hourglass_idx = 0
+        hourglass_idx = 0
     endif
     return char
 enddef
