@@ -455,7 +455,9 @@ def InitCommandsOrMappings() #{{{2
         #                │    └ Address
         #                └ Args
         #}}}
-        noise = '^\S*\zs.*\%43c'
+        # Make sure to match possible text after 43rd column:
+        # https://github.com/lacygoill/vim-fuzzy/issues/3
+        noise = '^\S*\zs.*\%43c\S*'
 
     elseif sourcetype =~ '^Mappings'
         cmd = 'verbose ' .. sourcetype[-2]->tolower() .. 'map'
