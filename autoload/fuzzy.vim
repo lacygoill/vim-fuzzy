@@ -492,11 +492,11 @@ def InitCommandsOrMappings() #{{{2
             # And `substitute()` replaces ` line 123` into `:123`.
             #}}}
             trailer: v->matchstr('/\zs[^/\\]*$')->substitute(' [^ ]* ', ':', ''),
-            # Don't invoke `ExpandTilde()` right now; it might be a little costly.{{{
+            # Don't invoke `AbsolutePath()` right now; it might be a little costly.{{{
             #
             # It was too costly in the past when we used `expand()`.  Now we use
-            # `ExpandTilde()`, which relies on  `substitute()` and is faster, so
-            # I don't know whether it would be still too costly.
+            # `AbsolutePath()`, which  relies on `fnamemodify()` and  is faster,
+            # so I don't know whether it would be still too costly.
             #}}}
             location: v->matchstr('Last set from .* line \d\+$'),
         }))
@@ -619,7 +619,7 @@ enddef
 def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
         + copy(v:oldfiles)
-            ->filter((_, v: string): bool => ExpandTilde(v)->filereadable())
+            ->filter((_, v: string): bool => AbsolutePath(v)->filereadable())
     recentfiles->map((_, v: string) => v->fnamemodify(':p'))
     var curbuf: string = expand('%:p')
     source = recentfiles
@@ -1302,7 +1302,7 @@ enddef
 def UpdateMainTitle() #{{{2
     var filtered_everything: bool = new_last_filtered_line == len(source) - 1
     # Special case:  no line matches what we've typed so far.
-    if line('$', menu_winid) == 1 && getbufline(menu_buf, 1) == ['']
+    if line('$', menu_winid) == 1 && getbufoneline(menu_buf, 1) == ''
         # Warning: It's important that even if no line matches, the title still respects the format `12/34 (56)`.{{{
         #
         # Otherwise, after pressing `C-u`, the title will still not respect the format.
@@ -1377,8 +1377,7 @@ def UpdateMainTitle() #{{{2
 enddef
 
 def UpdatePreview(timerid = 0) #{{{2
-    var line: string = getbufline(menu_buf, line('.', menu_winid))
-        ->get(0, '')
+    var line: string = getbufoneline(menu_buf, line('.', menu_winid))
 
     # clear the preview if nothing matches the filtering pattern
     if line == ''
@@ -1432,7 +1431,7 @@ def ExtractInfo(line: string): dict<any> #{{{3
             return {}
         endif
         return {
-            filename: matchlist[1]->ExpandTilde(),
+            filename: matchlist[1]->AbsolutePath(),
             lnum: matchlist[2],
         }
     endif
@@ -1499,7 +1498,7 @@ def ExtractInfo(line: string): dict<any> #{{{3
         if splitted->len() != 1
             return {}
         else
-            return {filename: splitted[0]->ExpandTilde()->fnamemodify(':p')}
+            return {filename: splitted[0]->AbsolutePath()}
         endif
     elseif sourcetype == 'HelpTags'
         return {
@@ -1516,7 +1515,7 @@ def ExtractInfo(line: string): dict<any> #{{{3
         }
     else
         return {
-            filename: splitted[0]->ExpandTilde()->fnamemodify(':p'),
+            filename: splitted[0]->AbsolutePath(),
             lnum: splitted[1],
         }
     endif
@@ -1763,8 +1762,7 @@ def PutCommitMessage(idx: number) #{{{2
     cursor(1, 1)
     var msg_last_line: number = search('^#', 'cnW', 0, 0,
         () => synstack('.', col('.'))
-        ->map((_, n: number) => n->synIDattr('name'))
-        ->match('gitcommitComment') == -1)
+        ->indexof((_, id: number) => id->synIDattr('name') =~ 'gitcommitComment') == -1)
 
     if msg_last_line == 0
         return
@@ -1897,8 +1895,8 @@ def BuflistedSorted(): list<string> #{{{2
     #
     # The maximal precision of `lastused` is only 1s.
     # `undotree()` has a much better precision, but the semantics of the sorting
-    # would change; i.e. the sorting would no longer be based on the last time a buffer
-    # was active, but on the last time it was changed.
+    # would change; i.e. the sorting would no longer be based on the last time a
+    # buffer was active, but on the last time it was changed.
     #}}}
     return getbufinfo({buflisted: true})
         ->filter((_, v: dict<any>): bool =>
@@ -1997,7 +1995,7 @@ def GetFindCmd(): string #{{{2
         by_name, by_extension, by_directory, hidden_files)
 enddef
 
-def ExpandTilde(path: string): string #{{{2
+def AbsolutePath(path: string): string #{{{2
     # Why don't you simply use `expand()`?{{{
     #
     # It expands too much, and might give unexpected errors.
@@ -2009,7 +2007,7 @@ def ExpandTilde(path: string): string #{{{2
     # Even though  `[a-1]` is an ugly  directory name, it's still  valid, and no
     # error should be given.
     #}}}
-    return path->substitute('^\~/', $HOME .. '/', '')
+    return path->fnamemodify(':p')
 enddef
 
 def FormatBigNumber(str: string): string #{{{2
@@ -2063,7 +2061,7 @@ def ToggleSelectedRegisterType() #{{{2
 # toggle type of selected register (characterwise → linewise → blockwise → ...)
 
     var lnum: number = line('.', menu_winid)
-    var line: string = getbufline(menu_buf, lnum)->get(0, '')
+    var line: string = getbufoneline(menu_buf, lnum)
     var matchlist: list<string> = matchlist(line, '^\([bcl]\)  "\(.\)')
     if matchlist->len() < 3
         return
