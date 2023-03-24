@@ -618,7 +618,7 @@ enddef
 
 def InitRecentFiles() #{{{2
     var recentfiles: list<string> = BuflistedSorted()
-        + copy(v:oldfiles)
+        + (copy(v:oldfiles) + fre)
             ->filter((_, v: string): bool => AbsolutePath(v)->filereadable())
     recentfiles->map((_, v: string) => v->fnamemodify(':p'))
     var curbuf: string = expand('%:p')
@@ -631,6 +631,12 @@ def InitRecentFiles() #{{{2
             location: ''
         }))
 enddef
+
+# `~/bin/fre`
+var fre: list<string>
+if executable('fre')
+    fre = systemlist('fre -f -l')
+endif
 
 def InitRegisters() #{{{2
     # We use `:registers` to get the names of all registers.
